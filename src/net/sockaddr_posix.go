@@ -41,6 +41,8 @@ func (fd *netFD) addrFunc() func(syscall.Sockaddr) Addr {
 			return sockaddrToTCP
 		case syscall.SOCK_DGRAM:
 			return sockaddrToUDP
+		case syscall.SOCK_SEQPACKET:
+			return sockaddrToSCTP
 		case syscall.SOCK_RAW:
 			return sockaddrToIP
 		}
