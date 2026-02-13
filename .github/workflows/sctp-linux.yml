@@ -1,0 +1,89 @@
+name: SCTP Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+      - 'sctp/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sctp-self-hosted:
+    name: SCTP self-hosted matrix
+    runs-on: [self-hosted, linux, sctp]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare runner
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if command -v modprobe >/dev/null 2>&1; then
+            modprobe sctp 2>/dev/null || {
+              if command -v sudo >/dev/null 2>&1; then
+                sudo modprobe sctp
+              fi
+            }
+          fi
+
+          if [[ ! -e /proc/net/sctp/assocs ]]; then
+            echo "SCTP kernel support is not active on this runner"
+            exit 1
+          fi
+
+          need_install=0
+          for bin in cmake g++; do
+            if ! command -v "$bin" >/dev/null 2>&1; then
+              need_install=1
+            fi
+          done
+
+          if [[ ! -f /usr/include/linux/sctp.h ]]; then
+            need_install=1
+          fi
+
+          if [[ "$need_install" -eq 1 ]]; then
+            if command -v sudo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y build-essential cmake linux-libc-dev
+            else
+              echo "Runner is missing required dependencies and cannot auto-install them"
+              exit 1
+            fi
+          fi
+
+      - name: Build Go toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd src
+          ./make.bash
+
+      - name: Run SCTP net tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          GOROOT="$PWD" ./bin/go test net -run '^TestSCTP|TestParseNetworkSCTP|TestResolveSCTPAddrUnknownNetwork' -count=1 -v
+
+      - name: Run Go/C++ interop matrix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          INTEROP_LOG_DIR="$PWD/misc/sctp-interop/logs" ./misc/sctp-interop/harness/run_matrix.sh
+
+      - name: Upload interop logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sctp-interop-logs
+          path: misc/sctp-interop/logs/
+          if-no-files-found: ignore
