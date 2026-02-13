@@ -67,6 +67,8 @@ func isIPv4(addr Addr) bool {
 		return addr.IP.To4() != nil
 	case *UDPAddr:
 		return addr.IP.To4() != nil
+	case *SCTPAddr:
+		return addr.IP.To4() != nil
 	case *IPAddr:
 		return addr.IP.To4() != nil
 	}
@@ -85,7 +87,7 @@ func (addrs addrList) forResolve(network, addr string) Addr {
 	case "ip":
 		// IPv6 literal (addr does NOT contain a port)
 		want6 = bytealg.CountString(addr, ':') > 0
-	case "tcp", "udp":
+	case "tcp", "udp", "sctp":
 		// IPv6 literal. (addr contains a port, so look for '[')
 		want6 = bytealg.CountString(addr, '[') > 0
 	}
@@ -253,7 +255,7 @@ func (r *Resolver) internetAddrList(ctx context.Context, net, addr string) (addr
 		portnum    int
 	)
 	switch net {
-	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6", "sctp", "sctp4", "sctp6":
 		if addr != "" {
 			if host, port, err = SplitHostPort(addr); err != nil {
 				return nil, err
@@ -275,6 +277,8 @@ func (r *Resolver) internetAddrList(ctx context.Context, net, addr string) (addr
 			return &TCPAddr{IP: ip.IP, Port: portnum, Zone: ip.Zone}
 		case "udp", "udp4", "udp6":
 			return &UDPAddr{IP: ip.IP, Port: portnum, Zone: ip.Zone}
+		case "sctp", "sctp4", "sctp6":
+			return &SCTPAddr{IP: ip.IP, Port: portnum, Zone: ip.Zone}
 		case "ip", "ip4", "ip6":
 			return &IPAddr{IP: ip.IP, Zone: ip.Zone}
 		default:
