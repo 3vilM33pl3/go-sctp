@@ -63,6 +63,10 @@ func (c *SCTPConn) writeToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int
 	if c.fd.isConnected && addr != nil {
 		return 0, ErrWriteToConnected
 	}
+	oob, err := marshalSCTPSndInfo(info)
+	if err != nil {
+		return 0, err
+	}
 	if !c.fd.isConnected && addr == nil {
 		if ra, ok := c.fd.raddr.(*SCTPAddr); ok {
 			addr = ra
@@ -72,16 +76,11 @@ func (c *SCTPConn) writeToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int
 	}
 
 	var sa syscall.Sockaddr
-	var err error
 	if addr != nil {
 		sa, err = addr.sockaddr(c.fd.family)
 		if err != nil {
 			return 0, err
 		}
-	}
-	oob, err := marshalSCTPSndInfo(info)
-	if err != nil {
-		return 0, err
 	}
 	n, _, err := c.fd.writeMsg(b, oob, sa)
 	if err != nil {

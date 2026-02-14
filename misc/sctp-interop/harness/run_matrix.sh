@@ -10,6 +10,7 @@ PORT_GO_SERVER=${PORT_GO_SERVER:-19000}
 PORT_CPP_SERVER=${PORT_CPP_SERVER:-19001}
 PORT_GO_MULTI_SERVER=${PORT_GO_MULTI_SERVER:-19002}
 GO_MULTI_HOSTS=${GO_MULTI_HOSTS:-127.0.0.1,127.0.0.2}
+PORT_GO_MULTI_FAILOVER_SERVER=${PORT_GO_MULTI_FAILOVER_SERVER:-19004}
 PORT_CPP_MULTI_SERVER=${PORT_CPP_MULTI_SERVER:-19003}
 CPP_MULTI_HOSTS=${CPP_MULTI_HOSTS:-127.0.0.1,127.0.0.2}
 
@@ -43,6 +44,8 @@ CPP_SERVER_CPPCPP_LOG="${INTEROP_LOG_DIR}/cpp_server_cppcpp.log"
 CPP_CLIENT_CPPCPP_LOG="${INTEROP_LOG_DIR}/cpp_client_cppcpp.log"
 GO_MULTI_SERVER_LOG="${INTEROP_LOG_DIR}/go_multi_server.log"
 GO_MULTI_CLIENT_LOG="${INTEROP_LOG_DIR}/go_multi_client.log"
+GO_MULTI_FAILOVER_SERVER_LOG="${INTEROP_LOG_DIR}/go_multi_failover_server.log"
+GO_MULTI_FAILOVER_CLIENT_LOG="${INTEROP_LOG_DIR}/go_multi_failover_client.log"
 CPP_MULTI_SERVER_LOG="${INTEROP_LOG_DIR}/cpp_multi_server.log"
 CPP_MULTI_CLIENT_LOG="${INTEROP_LOG_DIR}/cpp_multi_client.log"
 
@@ -56,6 +59,8 @@ CPP_MULTI_CLIENT_LOG="${INTEROP_LOG_DIR}/cpp_multi_client.log"
 : >"${CPP_CLIENT_CPPCPP_LOG}"
 : >"${GO_MULTI_SERVER_LOG}"
 : >"${GO_MULTI_CLIENT_LOG}"
+: >"${GO_MULTI_FAILOVER_SERVER_LOG}"
+: >"${GO_MULTI_FAILOVER_CLIENT_LOG}"
 : >"${CPP_MULTI_SERVER_LOG}"
 : >"${CPP_MULTI_CLIENT_LOG}"
 
@@ -115,7 +120,7 @@ grep -q "CPP_CLIENT_SENT" "${CPP_CLIENT_CPPCPP_LOG}"
 grep -q "CPP_SERVER_RECV" "${CPP_SERVER_CPPCPP_LOG}"
 grep -q "payload=cpp-to-cpp" "${CPP_SERVER_CPPCPP_LOG}"
 
-echo "[5/6] Go multihome server <- Go multihome client"
+echo "[5/7] Go multihome server <- Go multihome client"
 (
   cd "${ROOT}"
   GOROOT="${ROOT}" "${GO_BIN}" run ./misc/sctp-interop/go/multi_server.go "${GO_MULTI_HOSTS}" "${PORT_GO_MULTI_SERVER}" >"${GO_MULTI_SERVER_LOG}" 2>&1
@@ -132,7 +137,24 @@ grep -q "GO_MULTI_SERVER_RECV" "${GO_MULTI_SERVER_LOG}"
 grep -q "payload=go-multi-to-go-multi" "${GO_MULTI_SERVER_LOG}"
 grep -q "GO_MULTI_CLIENT_SENT" "${GO_MULTI_CLIENT_LOG}"
 
-echo "[6/6] C++ multihome server <- C++ multihome client"
+echo "[6/7] Go multihome failover path <- Go multihome client"
+(
+  cd "${ROOT}"
+  GOROOT="${ROOT}" "${GO_BIN}" run ./misc/sctp-interop/go/multi_server.go "${GO_MULTI_HOSTS}" "${PORT_GO_MULTI_FAILOVER_SERVER}" >"${GO_MULTI_FAILOVER_SERVER_LOG}" 2>&1
+) &
+GO_MULTI_FAILOVER_SERVER_PID=$!
+sleep 1
+(
+  cd "${ROOT}"
+  GOROOT="${ROOT}" "${GO_BIN}" run ./misc/sctp-interop/go/multi_client.go "127.0.0.3,${GO_MULTI_HOSTS}" "${PORT_GO_MULTI_FAILOVER_SERVER}" "go-multi-failover" 6 606 >"${GO_MULTI_FAILOVER_CLIENT_LOG}" 2>&1
+)
+wait "${GO_MULTI_FAILOVER_SERVER_PID}"
+
+grep -q "GO_MULTI_SERVER_RECV" "${GO_MULTI_FAILOVER_SERVER_LOG}"
+grep -q "payload=go-multi-failover" "${GO_MULTI_FAILOVER_SERVER_LOG}"
+grep -q "GO_MULTI_CLIENT_SENT" "${GO_MULTI_FAILOVER_CLIENT_LOG}"
+
+echo "[7/7] C++ multihome server <- C++ multihome client"
 "${CPP_BUILD_DIR}/sctp_cpp_server" "${CPP_MULTI_HOSTS}" "${PORT_CPP_MULTI_SERVER}" >"${CPP_MULTI_SERVER_LOG}" 2>&1 &
 CPP_MULTI_SERVER_PID=$!
 sleep 1
@@ -154,5 +176,7 @@ echo "CPP server (C++ client) log: ${CPP_SERVER_CPPCPP_LOG}"
 echo "CPP client (C++ server) log: ${CPP_CLIENT_CPPCPP_LOG}"
 echo "Go multihome server log: ${GO_MULTI_SERVER_LOG}"
 echo "Go multihome client log: ${GO_MULTI_CLIENT_LOG}"
+echo "Go multihome failover server log: ${GO_MULTI_FAILOVER_SERVER_LOG}"
+echo "Go multihome failover client log: ${GO_MULTI_FAILOVER_CLIENT_LOG}"
 echo "C++ multihome server log: ${CPP_MULTI_SERVER_LOG}"
 echo "C++ multihome client log: ${CPP_MULTI_CLIENT_LOG}"

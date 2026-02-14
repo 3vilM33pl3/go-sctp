@@ -143,6 +143,7 @@ type SCTPConn struct {
 	conn
 	multiLocal []SCTPAddr
 	multiPeer  []SCTPAddr
+	assocID    int32
 }
 
 func newSCTPConn(fd *netFD) *SCTPConn { return &SCTPConn{conn: conn{fd}} }

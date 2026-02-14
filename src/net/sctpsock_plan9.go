@@ -43,7 +43,7 @@ func subscribeSCTPEvents(*netFD, SCTPEventMask) error { return errSCTPUnsupporte
 
 func bindAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
 
-func connectAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
+func connectAddrsSCTP(*netFD, []SCTPAddr) (int32, error) { return 0, errSCTPUnsupported }
 
 func localAddrsSCTP(*netFD, int32) ([]SCTPAddr, error) { return nil, errSCTPUnsupported }
 

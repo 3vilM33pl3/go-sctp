@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func parseHosts(arg string) []string {
@@ -95,10 +96,21 @@ func main() {
 	}
 	defer conn.Close()
 
-	_, err = conn.WriteToSCTP([]byte(payload), nil, &net.SCTPSndInfo{Stream: stream, PPID: ppid})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "WriteToSCTP: %v\n", err)
-		os.Exit(1)
+	writes := 1
+	if len(hosts) > 2 {
+		// When the first path is unavailable, connectx may still be converging.
+		// Send a few user messages to make failover behavior deterministic.
+		writes = 3
+	}
+	for i := 0; i < writes; i++ {
+		_, err = conn.WriteToSCTP([]byte(payload), nil, &net.SCTPSndInfo{Stream: stream, PPID: ppid})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WriteToSCTP: %v\n", err)
+			os.Exit(1)
+		}
+		if writes > 1 && i != writes-1 {
+			time.Sleep(150 * time.Millisecond)
+		}
 	}
 	fmt.Printf("GO_MULTI_CLIENT_SENT stream=%d ppid=%d payload=%s\n", stream, ppid, payload)
 }
