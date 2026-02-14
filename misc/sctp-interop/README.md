@@ -9,7 +9,13 @@ This directory contains a Linux SCTP interoperability harness between:
 
 - `cpp/`: C++ server and client binaries
 - `go/`: Go server and client programs
-- `harness/run_matrix.sh`: matrix runner (`Go server <- C++ client`, `C++ server <- Go client`)
+- `harness/run_matrix.sh`: matrix runner for:
+  - `Go server <- Go client`
+  - `Go server <- C++ client`
+  - `C++ server <- Go client`
+  - `C++ server <- C++ client`
+  - `Go multihome server <- Go multihome client`
+  - `C++ multihome server <- C++ multihome client`
 
 ## Prerequisites
 
@@ -28,3 +34,7 @@ Optional environment overrides:
 
 - `PORT_GO_SERVER` (default `19000`)
 - `PORT_CPP_SERVER` (default `19001`)
+- `PORT_GO_MULTI_SERVER` (default `19002`)
+- `GO_MULTI_HOSTS` (default `127.0.0.1,127.0.0.2`)
+- `PORT_CPP_MULTI_SERVER` (default `19003`)
+- `CPP_MULTI_HOSTS` (default `127.0.0.1,127.0.0.2`)

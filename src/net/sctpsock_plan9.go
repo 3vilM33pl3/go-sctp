@@ -40,3 +40,11 @@ func setNoDelaySCTP(*netFD, bool) error { return errSCTPUnsupported }
 func setSCTPInitOptions(*netFD, SCTPInitOptions) error { return errSCTPUnsupported }
 
 func subscribeSCTPEvents(*netFD, SCTPEventMask) error { return errSCTPUnsupported }
+
+func bindAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
+
+func connectAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
+
+func localAddrsSCTP(*netFD, int32) ([]SCTPAddr, error) { return nil, errSCTPUnsupported }
+
+func peerAddrsSCTP(*netFD, int32) ([]SCTPAddr, error) { return nil, errSCTPUnsupported }

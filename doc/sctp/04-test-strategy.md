@@ -25,8 +25,11 @@ Current tests:
 
 Scenarios:
 
-1. Go server `<-` C++ client
-2. C++ server `<-` Go client
+1. Go server `<-` Go client
+2. Go server `<-` C++ client
+3. C++ server `<-` Go client
+4. C++ server `<-` C++ client
+5. Go multihome server `<-` Go multihome client
 
 ## Acceptance Criteria
 
