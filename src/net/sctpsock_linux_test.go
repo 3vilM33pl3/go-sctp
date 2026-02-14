@@ -105,3 +105,129 @@ func TestSCTPUnsupportedOnBadNetwork(t *testing.T) {
 		t.Fatalf("DialSCTP error=%v; want UnknownNetworkError", err)
 	}
 }
+
+func TestSCTPMultiListenLocalAddrs(t *testing.T) {
+	requireSCTP(t)
+
+	laddr := &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: 0},
+			{IP: IPv4(127, 0, 0, 2), Port: 0},
+		},
+	}
+	srv, err := ListenSCTPMulti("sctp4", laddr)
+	if err != nil {
+		t.Skipf("multihome listen unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	addrs, err := srv.LocalAddrs()
+	if err != nil {
+		t.Fatalf("LocalAddrs error: %v", err)
+	}
+	if len(addrs) == 0 {
+		t.Fatalf("LocalAddrs returned no addresses")
+	}
+	var sawLoopback2 bool
+	for i := range addrs {
+		if addrs[i].IP.Equal(IPv4(127, 0, 0, 2)) {
+			sawLoopback2 = true
+			break
+		}
+	}
+	if !sawLoopback2 {
+		t.Fatalf("LocalAddrs missing 127.0.0.2: got=%v", addrs)
+	}
+}
+
+func TestDialSCTPMultiRemoteMulti(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTPMulti("sctp4", &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: 0},
+			{IP: IPv4(127, 0, 0, 2), Port: 0},
+		},
+	})
+	if err != nil {
+		t.Skipf("multihome listen unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	sla, ok := srv.LocalAddr().(*SCTPAddr)
+	if !ok || sla == nil {
+		t.Fatalf("server LocalAddr type=%T; want *SCTPAddr", srv.LocalAddr())
+	}
+
+	cli, err := DialSCTPMulti("sctp4", nil, &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: sla.Port},
+			{IP: IPv4(127, 0, 0, 2), Port: sla.Port},
+		},
+	})
+	if err != nil {
+		t.Skipf("remote multihome dial unavailable: %v", err)
+	}
+	defer cli.Close()
+
+	payload := []byte("sctp-multi-remote")
+	if _, err := cli.WriteToSCTP(payload, nil, &SCTPSndInfo{Stream: 1, PPID: 11}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	if err := srv.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline(server) error: %v", err)
+	}
+	buf := make([]byte, 256)
+	for {
+		n, _, flags, _, _, err := srv.ReadFromSCTP(buf)
+		if err != nil {
+			t.Fatalf("ReadFromSCTP error: %v", err)
+		}
+		if flags&sctpMsgNotification != 0 {
+			continue
+		}
+		if !bytes.Equal(buf[:n], payload) {
+			t.Fatalf("payload mismatch got %q want %q", buf[:n], payload)
+		}
+		break
+	}
+}
+
+func TestDialSCTPMultiPeerAddrs(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTPMulti("sctp4", &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: 0},
+			{IP: IPv4(127, 0, 0, 2), Port: 0},
+		},
+	})
+	if err != nil {
+		t.Skipf("multihome listen unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	sla, _ := srv.LocalAddr().(*SCTPAddr)
+	if sla == nil {
+		t.Fatalf("server LocalAddr type=%T; want *SCTPAddr", srv.LocalAddr())
+	}
+
+	cli, err := DialSCTPMulti("sctp4", nil, &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: sla.Port},
+			{IP: IPv4(127, 0, 0, 2), Port: sla.Port},
+		},
+	})
+	if err != nil {
+		t.Skipf("remote multihome dial unavailable: %v", err)
+	}
+	defer cli.Close()
+
+	paddrs, err := cli.PeerAddrs()
+	if err != nil {
+		t.Fatalf("PeerAddrs error: %v", err)
+	}
+	if len(paddrs) != 2 {
+		t.Fatalf("PeerAddrs len=%d; want 2 (got=%v)", len(paddrs), paddrs)
+	}
+}

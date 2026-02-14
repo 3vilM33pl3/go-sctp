@@ -141,9 +141,11 @@ type SCTPEventMask struct {
 // for SCTP network connections.
 type SCTPConn struct {
 	conn
+	multiLocal []SCTPAddr
+	multiPeer  []SCTPAddr
 }
 
-func newSCTPConn(fd *netFD) *SCTPConn { return &SCTPConn{conn{fd}} }
+func newSCTPConn(fd *netFD) *SCTPConn { return &SCTPConn{conn: conn{fd}} }
 
 // SyscallConn returns a raw network connection.
 // This implements the [syscall.Conn] interface.
@@ -258,6 +260,10 @@ func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr 
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
 	}
+	c.multiPeer = []SCTPAddr{*raddr}
+	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+		c.multiLocal = []SCTPAddr{*la}
+	}
 	return c, nil
 }
 
@@ -279,6 +285,9 @@ func listenSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCT
 	c, err := sl.listenSCTP(ctx, laddr)
 	if err != nil {
 		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+	}
+	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+		c.multiLocal = []SCTPAddr{*la}
 	}
 	return c, nil
 }

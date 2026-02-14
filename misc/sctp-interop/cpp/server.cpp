@@ -10,12 +10,47 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
 [[noreturn]] void die(const std::string& msg) {
   std::cerr << "error: " << msg << ": " << std::strerror(errno) << "\n";
   std::exit(1);
+}
+
+std::vector<std::string> parse_hosts(const std::string& in) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+  while (start <= in.size()) {
+    std::size_t end = in.find(',', start);
+    std::string part = in.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (!part.empty()) out.push_back(part);
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  if (out.empty()) out.push_back("127.0.0.1");
+  return out;
+}
+
+sockaddr_in mk_addr(const std::string& host, int port) {
+  sockaddr_in out{};
+  out.sin_family = AF_INET;
+  out.sin_port = htons(static_cast<uint16_t>(port));
+  if (inet_pton(AF_INET, host.c_str(), &out.sin_addr) != 1) {
+    std::cerr << "error: invalid IPv4 address: " << host << "\n";
+    std::exit(1);
+  }
+  return out;
+}
+
+void bindx_extra_addrs(int fd, const std::vector<sockaddr_in>& addrs) {
+  if (addrs.size() <= 1) return;
+  std::vector<unsigned char> packed(sizeof(sockaddr_in) * (addrs.size() - 1));
+  std::memcpy(packed.data(), addrs.data() + 1, packed.size());
+  if (setsockopt(fd, IPPROTO_SCTP, SCTP_SOCKOPT_BINDX_ADD, packed.data(), static_cast<socklen_t>(packed.size())) < 0) {
+    die("setsockopt(SCTP_SOCKOPT_BINDX_ADD)");
+  }
 }
 
 void set_basic_opts(int fd) {
@@ -45,10 +80,10 @@ void set_basic_opts(int fd) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const char* bind_ip = "127.0.0.1";
+  std::string bind_hosts = "127.0.0.1";
   int bind_port = 19001;
 
-  if (argc > 1) bind_ip = argv[1];
+  if (argc > 1) bind_hosts = argv[1];
   if (argc > 2) bind_port = std::stoi(argv[2]);
 
   int fd = socket(AF_INET, SOCK_SEQPACKET, IPPROTO_SCTP);
@@ -56,17 +91,16 @@ int main(int argc, char** argv) {
 
   set_basic_opts(fd);
 
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(static_cast<uint16_t>(bind_port));
-  if (inet_pton(AF_INET, bind_ip, &addr.sin_addr) != 1) {
-    std::cerr << "error: invalid IPv4 address\n";
-    return 1;
-  }
+  std::vector<std::string> hosts = parse_hosts(bind_hosts);
+  std::vector<sockaddr_in> addrs;
+  addrs.reserve(hosts.size());
+  for (const auto& h : hosts) addrs.push_back(mk_addr(h, bind_port));
+  sockaddr_in addr = addrs.front();
 
   if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
     die("bind");
   }
+  bindx_extra_addrs(fd, addrs);
   if (listen(fd, 128) < 0) {
     die("listen");
   }
