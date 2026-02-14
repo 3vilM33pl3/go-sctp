@@ -191,10 +191,16 @@ func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, r
 		}
 	}
 	if len(raddr.Addrs) > 1 {
-		if err := connectAddrsSCTP(c.fd, raddr.Addrs); err != nil {
+		assocID, err := connectAddrsSCTP(c.fd, raddr.Addrs)
+		if err != nil {
 			c.Close()
 			return nil, &OpError{Op: "dial", Net: network, Source: la.opAddr(), Addr: ra.opAddr(), Err: err}
 		}
+		c.assocID = assocID
+		// Prefer a non-primary destination as the default send target to avoid
+		// getting pinned to an unavailable first address in multi-homed lists.
+		fallback := raddr.Addrs[1]
+		c.fd.raddr = &fallback
 	}
 	return c, nil
 }

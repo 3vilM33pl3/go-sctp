@@ -30,6 +30,8 @@ Scenarios:
 3. C++ server `<-` Go client
 4. C++ server `<-` C++ client
 5. Go multihome server `<-` Go multihome client
+6. Go multihome failover path `<-` Go multihome client
+7. C++ multihome server `<-` C++ multihome client
 
 ## Acceptance Criteria
 

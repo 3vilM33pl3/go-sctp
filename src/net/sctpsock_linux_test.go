@@ -231,3 +231,59 @@ func TestDialSCTPMultiPeerAddrs(t *testing.T) {
 		t.Fatalf("PeerAddrs len=%d; want 2 (got=%v)", len(paddrs), paddrs)
 	}
 }
+
+func TestDialSCTPMultiWriteFallback(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTPMulti("sctp4", &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			{IP: IPv4(127, 0, 0, 1), Port: 0},
+			{IP: IPv4(127, 0, 0, 2), Port: 0},
+		},
+	})
+	if err != nil {
+		t.Skipf("multihome listen unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	sla, _ := srv.LocalAddr().(*SCTPAddr)
+	if sla == nil {
+		t.Fatalf("server LocalAddr type=%T; want *SCTPAddr", srv.LocalAddr())
+	}
+
+	cli, err := DialSCTPMulti("sctp4", nil, &SCTPMultiAddr{
+		Addrs: []SCTPAddr{
+			// First path is intentionally unavailable to exercise fallback.
+			{IP: IPv4(127, 0, 0, 3), Port: sla.Port},
+			{IP: IPv4(127, 0, 0, 1), Port: sla.Port},
+			{IP: IPv4(127, 0, 0, 2), Port: sla.Port},
+		},
+	})
+	if err != nil {
+		t.Skipf("remote multihome dial unavailable: %v", err)
+	}
+	defer cli.Close()
+
+	payload := []byte("sctp-multi-fallback")
+	if _, err := cli.WriteToSCTP(payload, nil, &SCTPSndInfo{Stream: 3, PPID: 77}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+
+	if err := srv.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline(server) error: %v", err)
+	}
+	buf := make([]byte, 256)
+	for {
+		n, _, flags, _, _, err := srv.ReadFromSCTP(buf)
+		if err != nil {
+			t.Fatalf("ReadFromSCTP error: %v", err)
+		}
+		if flags&sctpMsgNotification != 0 {
+			continue
+		}
+		if !bytes.Equal(buf[:n], payload) {
+			t.Fatalf("payload mismatch got %q want %q", buf[:n], payload)
+		}
+		break
+	}
+}

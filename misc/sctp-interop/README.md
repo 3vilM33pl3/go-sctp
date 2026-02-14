@@ -15,6 +15,7 @@ This directory contains a Linux SCTP interoperability harness between:
   - `C++ server <- Go client`
   - `C++ server <- C++ client`
   - `Go multihome server <- Go multihome client`
+  - `Go multihome failover path <- Go multihome client`
   - `C++ multihome server <- C++ multihome client`
 
 ## Prerequisites
@@ -36,5 +37,6 @@ Optional environment overrides:
 - `PORT_CPP_SERVER` (default `19001`)
 - `PORT_GO_MULTI_SERVER` (default `19002`)
 - `GO_MULTI_HOSTS` (default `127.0.0.1,127.0.0.2`)
+- `PORT_GO_MULTI_FAILOVER_SERVER` (default `19004`)
 - `PORT_CPP_MULTI_SERVER` (default `19003`)
 - `CPP_MULTI_HOSTS` (default `127.0.0.1,127.0.0.2`)

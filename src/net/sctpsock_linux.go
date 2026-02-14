@@ -228,15 +228,15 @@ func bindAddrsSCTP(fd *netFD, addrs []SCTPAddr) error {
 	return setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptBindxAdd, b)
 }
 
-func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) error {
+func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) (int32, error) {
 	if len(addrs) == 0 {
-		return errMissingAddress
+		return 0, errMissingAddress
 	}
 	b, err := marshalRawSockaddrsSCTP(fd.family, addrs)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, _, errno := syscall.Syscall6(
+	r0, _, errno := syscall.Syscall6(
 		syscall.SYS_SETSOCKOPT,
 		uintptr(fd.pfd.Sysfd),
 		uintptr(syscall.IPPROTO_SCTP),
@@ -247,13 +247,13 @@ func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) error {
 	)
 	runtime.KeepAlive(fd)
 	if errno == 0 || errno == syscall.EINPROGRESS || errno == syscall.EALREADY {
-		return nil
+		return int32(r0), nil
 	}
 	if errno != syscall.ENOPROTOOPT {
-		return wrapSyscallError("setsockopt", errno)
+		return 0, wrapSyscallError("setsockopt", errno)
 	}
 	// Fallback used by older kernels.
-	_, _, errno = syscall.Syscall6(
+	r0, _, errno = syscall.Syscall6(
 		syscall.SYS_SETSOCKOPT,
 		uintptr(fd.pfd.Sysfd),
 		uintptr(syscall.IPPROTO_SCTP),
@@ -264,9 +264,9 @@ func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) error {
 	)
 	runtime.KeepAlive(fd)
 	if errno != 0 && errno != syscall.EINPROGRESS && errno != syscall.EALREADY {
-		return wrapSyscallError("setsockopt", errno)
+		return 0, wrapSyscallError("setsockopt", errno)
 	}
-	return nil
+	return int32(r0), nil
 }
 
 func localAddrsSCTP(fd *netFD, assocID int32) ([]SCTPAddr, error) {
