@@ -43,3 +43,9 @@ Scenarios:
 
 - For Go tests, re-run with `-v -run TestSCTPLoopbackReadWrite`
 - For interop, inspect log files printed by `run_matrix.sh`
+
+## External Standards Conformance
+
+For external (non-project) standards-oriented validation profile, see:
+
+- `doc/sctp/08-external-conformance-profile.md`
