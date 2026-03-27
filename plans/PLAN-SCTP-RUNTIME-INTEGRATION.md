@@ -115,7 +115,7 @@ Re-implement SCTP in the latest Go runtime on Linux so SCTP is integrated in `ne
   - Mitigation: explicit API docs and examples.
 
 ## Deliverables
-- Runtime source changes in `go-sctp-linux/src/net/*`.
-- SCTP design and implementation docs in `go-sctp-linux/doc/sctp/*`.
-- Go and C++ interop harness in `go-sctp-linux/misc/sctp-interop/*`.
-- Reproducible tests and benchmark artifacts in `go-sctp-linux/artifacts/*` (and/or CI artifacts).
+- Runtime source changes in `go-sctp/src/net/*`.
+- SCTP design and implementation docs in `go-sctp/doc/sctp/*`.
+- Go and C++ interop harness in `go-sctp/misc/sctp-interop/*`.
+- Reproducible tests and benchmark artifacts in `go-sctp/artifacts/*` (and/or CI artifacts).
