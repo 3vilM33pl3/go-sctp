@@ -12,7 +12,6 @@ import (
 
 const (
 	msgNotification = 0x8000
-	sctpUnordered   = 0x0001
 )
 
 type runner struct {
@@ -21,103 +20,38 @@ type runner struct {
 
 type featureHandler func(context.Context, *runner, *scenarioContract) (*completionPayload, error)
 
-type unsupportedSpec struct {
-	Reason       string
-	EvidenceKind string
-	EvidenceText string
-}
-
 var supportedFeatureHandlers = map[string]featureHandler{
-	"socket_create":                    handleSocketCreate,
-	"bind_listen_connect":              handleBasicSend,
-	"single_message_boundary":          handleBasicSend,
-	"multi_message_boundary":           handleBasicSend,
-	"stream_id":                        handleBasicSend,
-	"ppid":                             handleBasicSend,
-	"nodelay":                          handleNoDelay,
-	"initmsg":                          handleInitMsg,
-	"notifications":                    handleNotificationScenario,
-	"event_subscription_matrix":        handleNotificationScenario,
+	"socket_create":                      handleSocketCreate,
+	"bind_listen_connect":                handleBasicSend,
+	"single_message_boundary":            handleBasicSend,
+	"multi_message_boundary":             handleBasicSend,
+	"stream_id":                          handleBasicSend,
+	"ppid":                               handleBasicSend,
+	"nodelay":                            handleNoDelay,
+	"initmsg":                            handleInitMsg,
+	"rto_assoc_parameters":               handleRTOInfo,
+	"default_sndinfo_recvrcvinfo":        handleDefaultSendInfo,
+	"recvnxtinfo":                        handleRecvNxtInfo,
+	"autoclose":                          handleAutoClose,
+	"notifications":                      handleNotificationScenario,
+	"event_subscription_matrix":          handleNotificationScenario,
 	"association_shutdown_notifications": handleNotificationScenario,
-	"multi_bind":                       handleMultiBind,
-	"local_addr_enum":                  handleLocalAddrEnum,
-	"peer_addr_enum":                   handlePeerAddrEnum,
-	"negative_connect_error":           handleNegativeConnectError,
-	"unordered_delivery":               handleUnorderedDelivery,
-}
-
-var unsupportedFeatureSpecs = map[string]unsupportedSpec{
-	"rto_assoc_parameters": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP_RTOINFO in the current public SCTP client API",
-	},
-	"default_sndinfo_recvrcvinfo": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp exposes per-message SCTPSndInfo but not a socket-level SCTP_DEFAULT_SNDINFO setter",
-	},
-	"recvnxtinfo": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP_RECVNXTINFO or next-message metadata in the current API",
-	},
-	"autoclose": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP_AUTOCLOSE in the current public SCTP client API",
-	},
-	"bindx_add_remove": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp can dial multi-address associations but does not expose SCTP_BINDX add/remove controls for the client socket",
-	},
-	"primary_addr_management": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose local primary-address management in the current SCTP client API",
-	},
-	"peer_primary_addr_request": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose peer primary-address request controls in the current SCTP client API",
-	},
-	"peeloff_assoc": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP peeloff in the current public SCTP client API",
-	},
-	"assoc_id_listing": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose association identifier listing in the current SCTP client API",
-	},
-	"assoc_status_opt_info": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP_STATUS or sctp_opt_info-style association status queries in the current API",
-	},
-	"stream_reconfig_reset": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP stream reset controls in the current public SCTP client API",
-	},
-	"stream_reconfig_add_streams": {
-		Reason:       "missing API",
-		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp does not expose SCTP add-stream reconfiguration controls in the current public SCTP client API",
-	},
+	"multi_bind":                         handleMultiBind,
+	"local_addr_enum":                    handleLocalAddrEnum,
+	"peer_addr_enum":                     handlePeerAddrEnum,
+	"bindx_add_remove":                   handleBindxAddRemove,
+	"primary_addr_management":            handlePrimaryAddrManagement,
+	"peer_primary_addr_request":          handlePeerPrimaryAddrRequest,
+	"peeloff_assoc":                      handlePeelOffAssoc,
+	"assoc_id_listing":                   handleAssocIDListing,
+	"assoc_status_opt_info":              handleAssocStatus,
+	"stream_reconfig_reset":              handleStreamReset,
+	"stream_reconfig_add_streams":        handleStreamAddStreams,
+	"negative_connect_error":             handleNegativeConnectError,
+	"unordered_delivery":                 handleUnorderedDelivery,
 }
 
 func (r *runner) runFeature(ctx context.Context, sessionID string, feature catalogFeature) (*featureState, error) {
-	if spec, ok := unsupportedFeatureSpecs[feature.ID]; ok {
-		return r.client.unsupportedFeature(ctx, sessionID, feature.ID, unsupportedPayload{
-			Reason:       spec.Reason,
-			EvidenceKind: spec.EvidenceKind,
-			EvidenceText: spec.EvidenceText,
-		})
-	}
-
 	handler, ok := supportedFeatureHandlers[feature.ID]
 	if !ok {
 		return r.client.unsupportedFeature(ctx, sessionID, feature.ID, unsupportedPayload{
@@ -251,6 +185,131 @@ func handleInitMsg(ctx context.Context, _ *runner, contract *scenarioContract) (
 	}, nil
 }
 
+func handleRTOInfo(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	info := net.SCTPRTOInfo{Initial: 1500, Max: 4000, Min: 800}
+	if err := conn.SetRTOInfo(info); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetRTOInfo succeeded with initial=%d max=%d min=%d", info.Initial, info.Max, info.Min),
+		ReportText:   fmt.Sprintf("client applied SCTP_RTOINFO initial=%d max=%d min=%d", info.Initial, info.Max, info.Min),
+	}, nil
+}
+
+func handleDefaultSendInfo(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if len(contract.ClientSendMessages) == 0 {
+		return nil, fmt.Errorf("feature %s did not provide client send messages", contract.FeatureID)
+	}
+	msg := contract.ClientSendMessages[0]
+	info := net.SCTPSndInfo{Stream: msg.Stream, PPID: msg.PPID}
+	if err := conn.SetDefaultSendInfo(info); err != nil {
+		return nil, err
+	}
+	if _, err := conn.WriteToSCTP([]byte(msg.Payload), nil, nil); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetDefaultSendInfo succeeded with stream=%d ppid=%d and send used default metadata", msg.Stream, msg.PPID),
+		ReportText:   fmt.Sprintf("client applied SCTP_DEFAULT_SNDINFO stream=%d ppid=%d", msg.Stream, msg.PPID),
+	}, nil
+}
+
+func handleRecvNxtInfo(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvNxtInfo(true); err != nil {
+		return nil, err
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)); err != nil {
+		return nil, err
+	}
+	if contract.TriggerPayload != "" {
+		if _, err := conn.WriteToSCTP([]byte(contract.TriggerPayload), nil, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(contract.ServerSendMessages) < 2 {
+		return nil, fmt.Errorf("feature %s requires two server messages", contract.FeatureID)
+	}
+	buf := make([]byte, 4096)
+	n, _, flags, _, info, err := conn.ReadFromSCTP(buf)
+	if err != nil {
+		return nil, err
+	}
+	if flags&msgNotification != 0 {
+		return nil, fmt.Errorf("received notification before first server message")
+	}
+	if got, want := string(buf[:n]), contract.ServerSendMessages[0].Payload; got != want {
+		return nil, fmt.Errorf("unexpected first payload %q, want %q", got, want)
+	}
+	if info == nil || info.Next == nil {
+		return nil, fmt.Errorf("missing next-message metadata on first receive")
+	}
+	next := contract.ServerSendMessages[1]
+	if info.Next.Stream != next.Stream {
+		return nil, fmt.Errorf("unexpected next stream %d, want %d", info.Next.Stream, next.Stream)
+	}
+	if info.Next.PPID != next.PPID {
+		return nil, fmt.Errorf("unexpected next ppid %d, want %d", info.Next.PPID, next.PPID)
+	}
+	if int(info.Next.Length) != len(next.Payload) {
+		return nil, fmt.Errorf("unexpected next length %d, want %d", info.Next.Length, len(next.Payload))
+	}
+	if _, err := readServerMessages(conn, contract.ServerSendMessages[1:]); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("observed next-message metadata stream=%d ppid=%d length=%d", info.Next.Stream, info.Next.PPID, info.Next.Length),
+		ReportText:   fmt.Sprintf("client observed SCTP_RECVNXTINFO for stream=%d ppid=%d length=%d", info.Next.Stream, info.Next.PPID, info.Next.Length),
+	}, nil
+}
+
+func handleAutoClose(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	const seconds = 7
+	if err := conn.SetAutoClose(seconds); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetAutoClose(%d) succeeded", seconds),
+		ReportText:   fmt.Sprintf("client applied SCTP_AUTOCLOSE=%d", seconds),
+	}, nil
+}
+
 func handleNotificationScenario(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
 	conn, err := dialContract(contract)
 	if err != nil {
@@ -343,6 +402,200 @@ func handlePeerAddrEnum(ctx context.Context, _ *runner, contract *scenarioContra
 	}, nil
 }
 
+func handleBindxAddRemove(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, peer, extra, err := openBoundFeatureSocket(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if len(extra) > 0 {
+		if err := conn.BindAddrs(extra); err != nil {
+			return nil, err
+		}
+		if err := conn.UnbindAddrs(extra); err != nil {
+			return nil, err
+		}
+		if err := conn.BindAddrs(extra); err != nil {
+			return nil, err
+		}
+	}
+	if err := sendContractMessagesToPeer(conn, peer, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("performed bindx add/remove using local addresses %s", renderSCTPAddrs(extra)),
+		ReportText:   fmt.Sprintf("client added, removed, and re-added local SCTP addresses %s", renderSCTPAddrs(extra)),
+	}, nil
+}
+
+func handlePrimaryAddrManagement(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	peerAddrs, err := conn.PeerAddrs()
+	if err != nil {
+		return nil, err
+	}
+	if len(peerAddrs) == 0 {
+		return nil, fmt.Errorf("no peer addresses available for primary-address management")
+	}
+	if err := conn.SetPrimaryAddr(&peerAddrs[len(peerAddrs)-1]); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	target := peerAddrs[len(peerAddrs)-1]
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetPrimaryAddr succeeded for %s", target.String()),
+		ReportText:   fmt.Sprintf("client requested peer address %s as the primary destination", target.String()),
+	}, nil
+}
+
+func handlePeerPrimaryAddrRequest(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	localAddrs, err := conn.LocalAddrs()
+	if err != nil {
+		return nil, err
+	}
+	if len(localAddrs) == 0 {
+		return nil, fmt.Errorf("no local addresses available for peer primary-address request")
+	}
+	if err := conn.SetPeerPrimaryAddr(&localAddrs[0]); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetPeerPrimaryAddr succeeded for %s", localAddrs[0].String()),
+		ReportText:   fmt.Sprintf("client requested peer primary address change to local address %s", localAddrs[0].String()),
+	}, nil
+}
+
+func handlePeelOffAssoc(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	peeled, err := conn.PeelOff(0)
+	if err != nil {
+		return nil, err
+	}
+	defer peeled.Close()
+
+	if err := sendContractMessages(peeled, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: "PeelOff(0) succeeded and the peeled association sent the probe payload",
+		ReportText:   "client peeled the association onto a dedicated socket and sent the probe payload there",
+	}, nil
+}
+
+func handleAssocIDListing(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	ids, err := conn.AssocIDs()
+	if err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("enumerated %d association id(s)", len(ids)),
+		ReportText:   fmt.Sprintf("association ids: %s", renderAssocIDs(ids)),
+	}, nil
+}
+
+func handleAssocStatus(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+		return nil, err
+	}
+	status, err := conn.AssocStatus(0)
+	if err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("association state=%d in_streams=%d out_streams=%d primary=%s", status.State, status.InStreams, status.OutStreams, status.PrimaryAddr.String()),
+		ReportText:   fmt.Sprintf("association status state=%d in_streams=%d out_streams=%d primary=%s", status.State, status.InStreams, status.OutStreams, status.PrimaryAddr.String()),
+	}, nil
+}
+
+func handleStreamReset(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := conn.EnableStreamReset(net.SCTPStreamResetIncoming | net.SCTPStreamResetOutgoing); err != nil {
+		return nil, err
+	}
+	if _, err := runTriggerAndRead(conn, contract); err != nil {
+		return nil, err
+	}
+	if err := conn.ResetStreams(net.SCTPStreamResetOutgoing, []uint16{contract.ServerSendMessages[0].Stream}); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("stream reset request succeeded for stream=%d", contract.ServerSendMessages[0].Stream),
+		ReportText:   fmt.Sprintf("client requested SCTP stream reset for stream=%d", contract.ServerSendMessages[0].Stream),
+	}, nil
+}
+
+func handleStreamAddStreams(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := conn.EnableStreamReset(net.SCTPStreamResetIncoming | net.SCTPStreamResetOutgoing); err != nil {
+		return nil, err
+	}
+	if _, err := runTriggerAndRead(conn, contract); err != nil {
+		return nil, err
+	}
+	if err := conn.AddStreams(1, 1); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: "AddStreams(1,1) succeeded",
+		ReportText:   "client requested one additional inbound stream and one additional outbound stream",
+	}, nil
+}
+
 func handleNegativeConnectError(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
 	raddr, err := net.ResolveSCTPAddr("sctp4", contract.NegativeTarget)
 	if err != nil {
@@ -383,7 +636,7 @@ func handleUnorderedDelivery(ctx context.Context, _ *runner, contract *scenarioC
 		info := &net.SCTPSndInfo{
 			Stream: msg.Stream,
 			PPID:   msg.PPID,
-			Flags:  sctpUnordered,
+			Flags:  net.SCTPUnordered,
 		}
 		if _, err := conn.WriteToSCTP([]byte(msg.Payload), nil, info); err != nil {
 			return nil, err
@@ -391,8 +644,8 @@ func handleUnorderedDelivery(ctx context.Context, _ *runner, contract *scenarioC
 	}
 	return &completionPayload{
 		EvidenceKind: "runtime",
-		EvidenceText: "sent the probe payload with SCTPSndInfo.Flags set to SCTP_UNORDERED",
-		ReportText:   "client attempted unordered delivery using SCTPSndInfo.Flags",
+		EvidenceText: "sent the probe payload with SCTPSndInfo.Flags set to net.SCTPUnordered",
+		ReportText:   "client attempted unordered delivery using net.SCTPUnordered",
 	}, nil
 }
 
@@ -422,6 +675,22 @@ func sendContractMessages(conn *net.SCTPConn, messages []messageSpec) error {
 			PPID:   msg.PPID,
 		}
 		if _, err := conn.WriteToSCTP([]byte(msg.Payload), nil, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sendContractMessagesToPeer(conn *net.SCTPConn, peer *net.SCTPAddr, messages []messageSpec) error {
+	if peer == nil {
+		return fmt.Errorf("no peer address available")
+	}
+	for _, msg := range messages {
+		info := &net.SCTPSndInfo{
+			Stream: msg.Stream,
+			PPID:   msg.PPID,
+		}
+		if _, err := conn.WriteToSCTP([]byte(msg.Payload), peer, info); err != nil {
 			return err
 		}
 	}
@@ -478,6 +747,52 @@ func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificatio
 	return summary, nil
 }
 
+func runTriggerAndRead(conn *net.SCTPConn, contract *scenarioContract) (notificationSummary, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)); err != nil {
+		return notificationSummary{}, err
+	}
+	if contract.TriggerPayload != "" {
+		if _, err := conn.WriteToSCTP([]byte(contract.TriggerPayload), nil, nil); err != nil {
+			return notificationSummary{}, err
+		}
+	}
+	return readServerMessages(conn, contract.ServerSendMessages)
+}
+
+func openBoundFeatureSocket(contract *scenarioContract) (*net.SCTPConn, *net.SCTPAddr, []net.SCTPAddr, error) {
+	if len(contract.ConnectAddresses) == 0 {
+		return nil, nil, nil, fmt.Errorf("feature %s did not provide connect addresses", contract.FeatureID)
+	}
+	raddr, err := net.ResolveSCTPAddr(contract.Transport, contract.ConnectAddresses[0])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	localBase, extras, err := selectBindxLocalAddrs(raddr)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	conn, err := net.ListenSCTP(contract.Transport, localBase)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return conn, raddr, extras, nil
+}
+
+func selectBindxLocalAddrs(remote *net.SCTPAddr) (*net.SCTPAddr, []net.SCTPAddr, error) {
+	udpConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: remote.IP, Port: remote.Port})
+	if err == nil {
+		defer udpConn.Close()
+		if la, ok := udpConn.LocalAddr().(*net.UDPAddr); ok && la != nil && la.IP != nil {
+			base := &net.SCTPAddr{IP: la.IP, Port: 0}
+			if !la.IP.IsLoopback() {
+				return base, []net.SCTPAddr{{IP: net.IPv4(127, 0, 0, 2), Port: 0}}, nil
+			}
+			return base, []net.SCTPAddr{{IP: net.IPv4(127, 0, 0, 1), Port: 0}}, nil
+		}
+	}
+	return &net.SCTPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}, []net.SCTPAddr{{IP: net.IPv4(127, 0, 0, 2), Port: 0}}, nil
+}
+
 func (n notificationSummary) renderedFlags() string {
 	if len(n.flags) == 0 {
 		return "[]"
@@ -527,15 +842,23 @@ func renderSCTPAddrs(addrs []net.SCTPAddr) string {
 }
 
 func mustFeatureIDs() []string {
-	ids := make([]string, 0, len(supportedFeatureHandlers)+len(unsupportedFeatureSpecs))
+	ids := make([]string, 0, len(supportedFeatureHandlers))
 	for id := range supportedFeatureHandlers {
-		ids = append(ids, id)
-	}
-	for id := range unsupportedFeatureSpecs {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+func renderAssocIDs(ids []int32) string {
+	if len(ids) == 0 {
+		return "[]"
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, strconv.Itoa(int(id)))
+	}
+	return "[" + strings.Join(out, ",") + "]"
 }
 
 func knownTerminalState(state string) bool {

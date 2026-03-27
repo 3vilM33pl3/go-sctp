@@ -34,8 +34,8 @@ func TestBuildEventMask(t *testing.T) {
 
 func TestFeatureMappingsDoNotOverlap(t *testing.T) {
 	for id := range supportedFeatureHandlers {
-		if _, ok := unsupportedFeatureSpecs[id]; ok {
-			t.Fatalf("feature %q is both supported and unsupported", id)
+		if id == "" {
+			t.Fatal("supported feature id should not be empty")
 		}
 	}
 }

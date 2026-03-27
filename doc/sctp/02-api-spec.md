@@ -7,6 +7,9 @@
 - `type SCTPInitOptions struct`
 - `type SCTPSndInfo struct`
 - `type SCTPRcvInfo struct`
+- `type SCTPNxtInfo struct`
+- `type SCTPRTOInfo struct`
+- `type SCTPAssocStatus struct`
 - `type SCTPEventMask struct`
 
 ## New Public Functions
@@ -23,7 +26,22 @@
 - `WriteToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int, error)`
 - `SetNoDelay(bool) error`
 - `SetInitOptions(SCTPInitOptions) error`
+- `SetRTOInfo(SCTPRTOInfo) error`
+- `SetDefaultSendInfo(SCTPSndInfo) error`
+- `SetRecvRcvInfo(bool) error`
+- `SetRecvNxtInfo(bool) error`
+- `SetAutoClose(uint32) error`
 - `SubscribeEvents(SCTPEventMask) error`
+- `BindAddrs([]SCTPAddr) error`
+- `UnbindAddrs([]SCTPAddr) error`
+- `SetPrimaryAddr(*SCTPAddr) error`
+- `SetPeerPrimaryAddr(*SCTPAddr) error`
+- `PeelOff(assocID int32) (*SCTPConn, error)`
+- `AssocIDs() ([]int32, error)`
+- `AssocStatus(assocID int32) (*SCTPAssocStatus, error)`
+- `EnableStreamReset(flags uint16) error`
+- `ResetStreams(flags uint16, streams []uint16) error`
+- `AddStreams(in, out uint16) error`
 
 ## Dispatch Integration
 
@@ -34,3 +52,8 @@
 
 - Linux is the only fully supported platform in v1.
 - Non-Linux builds compile via stubs and return unsupported errors at runtime.
+- `SCTPRcvInfo.Next` is populated when `SetRecvNxtInfo(true)` is enabled and
+  the kernel supplies `SCTP_NXTINFO` ancillary data.
+- Dialed SCTP sockets use Linux `connectx` internally so association-level APIs
+  such as `AssocIDs`, `AssocStatus`, peeloff, primary-address management, and
+  stream reconfiguration can target a live association.
