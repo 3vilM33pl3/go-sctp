@@ -96,13 +96,31 @@ func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCT
 			return sd.Dialer.Control(network, address, c)
 		}
 	}
-	// Use one-to-many style sockets in v1: bind locally without connect(2),
-	// and retain remote address as the default destination for WriteToSCTP(nil addr).
+	// Dialed SCTP sockets use one-to-one style semantics so the client side can
+	// interoperate cleanly with remote SCTP stacks over connect(2).
 	var la sockaddr
 	if laddr != nil {
 		la = laddr
 	}
-	fd, err := internetSocket(ctx, sd.network, la, nil, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP, "dial", ctrlCtxFn)
+	fd, err := internetSocket(ctx, sd.network, la, raddr, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP, "dial", ctrlCtxFn)
+	if err != nil {
+		return nil, err
+	}
+	return newSCTPConn(fd), nil
+}
+
+func (sd *sysDialer) openSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+	ctrlCtxFn := sd.Dialer.ControlContext
+	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
+		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			return sd.Dialer.Control(network, address, c)
+		}
+	}
+	var la sockaddr
+	if laddr != nil {
+		la = laddr
+	}
+	fd, err := internetSocket(ctx, sd.network, la, nil, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP, "dial", ctrlCtxFn)
 	if err != nil {
 		return nil, err
 	}

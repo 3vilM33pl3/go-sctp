@@ -62,6 +62,7 @@ func parseSCTPRcvInfo([]byte) (*SCTPRcvInfo, error) { return nil, errSCTPUnsuppo
 func setNoDelaySCTP(*netFD, bool) error { return errSCTPUnsupported }
 
 func setSCTPInitOptions(*netFD, SCTPInitOptions) error { return errSCTPUnsupported }
+func setSCTPInitOptionsSockFD(int, SCTPInitOptions) error { return errSCTPUnsupported }
 
 func setSCTPRecvRcvInfo(*netFD, bool) error { return errSCTPUnsupported }
 

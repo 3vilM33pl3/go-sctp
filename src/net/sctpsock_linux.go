@@ -281,6 +281,42 @@ func setSCTPInitOptions(fd *netFD, opts SCTPInitOptions) error {
 	return setSCTPRecvRcvInfo(fd, true)
 }
 
+func setSCTPInitOptionsSockFD(sysfd int, opts SCTPInitOptions) error {
+	sim := sctpInitMsg{
+		NumOStreams:    opts.NumOStreams,
+		MaxInStreams:   opts.MaxInStreams,
+		MaxAttempts:    opts.MaxAttempts,
+		MaxInitTimeout: opts.MaxInitTimeout,
+	}
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&sim)), sizeofSCTPInitMsg)
+	_, _, errno := syscall.Syscall6(
+		syscall.SYS_SETSOCKOPT,
+		uintptr(sysfd),
+		uintptr(syscall.IPPROTO_SCTP),
+		uintptr(sctpSockoptInitMsg),
+		uintptr(unsafe.Pointer(&b[0])),
+		uintptr(len(b)),
+		0,
+	)
+	if errno != 0 {
+		return wrapSyscallError("setsockopt", errno)
+	}
+	one := 1
+	_, _, errno = syscall.Syscall6(
+		syscall.SYS_SETSOCKOPT,
+		uintptr(sysfd),
+		uintptr(syscall.IPPROTO_SCTP),
+		uintptr(sctpSockoptRecvRcvInfo),
+		uintptr(unsafe.Pointer(&one)),
+		uintptr(unsafe.Sizeof(one)),
+		0,
+	)
+	if errno != 0 {
+		return wrapSyscallError("setsockopt", errno)
+	}
+	return nil
+}
+
 func setSCTPRecvRcvInfo(fd *netFD, on bool) error {
 	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptRecvRcvInfo, boolint(on))
 }
