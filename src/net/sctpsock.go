@@ -486,16 +486,56 @@ func DialSCTP(network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	return dialSCTP(context.Background(), nil, network, laddr, raddr)
 }
 
-func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
-	c, err := openDialSCTP(ctx, dialer, network, laddr, raddr)
-	if err != nil {
-		return nil, err
+// DialSCTPInit acts like [DialSCTP] and configures SCTP_INITMSG before connect.
+func DialSCTPInit(network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
+	return dialSCTPInit(context.Background(), nil, network, laddr, raddr, opts)
+}
+
+func dialSCTPInit(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
+	d := &Dialer{}
+	if dialer != nil {
+		*d = *dialer
 	}
-	if assocID, err := connectAddrsSCTP(c.fd, []SCTPAddr{*raddr}); err != nil {
-		c.Close()
+	prevCtx := d.ControlContext
+	prev := d.Control
+	d.Control = nil
+	d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+		if prevCtx != nil {
+			if err := prevCtx(ctx, network, address, c); err != nil {
+				return err
+			}
+		} else if prev != nil {
+			if err := prev(network, address, c); err != nil {
+				return err
+			}
+		}
+		var innerErr error
+		if err := c.Control(func(fd uintptr) {
+			innerErr = setSCTPInitOptionsSockFD(int(fd), opts)
+		}); err != nil {
+			return err
+		}
+		return innerErr
+	}
+	return dialSCTP(ctx, d, network, laddr, raddr)
+}
+
+func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+	switch network {
+	case "sctp", "sctp4", "sctp6":
+	default:
+		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: UnknownNetworkError(network)}
+	}
+	if raddr == nil {
+		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: nil, Err: errMissingAddress}
+	}
+	sd := &sysDialer{network: network, address: raddr.String()}
+	if dialer != nil {
+		sd.Dialer = *dialer
+	}
+	c, err := sd.dialSCTP(ctx, laddr, raddr)
+	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-	} else if assocID != 0 {
-		c.assocID = assocID
 	}
 	c.multiPeer = []SCTPAddr{*raddr}
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
@@ -517,7 +557,7 @@ func openDialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, ra
 	if dialer != nil {
 		sd.Dialer = *dialer
 	}
-	c, err := sd.dialSCTP(ctx, laddr, raddr)
+	c, err := sd.openSCTP(ctx, laddr, raddr)
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
 	}

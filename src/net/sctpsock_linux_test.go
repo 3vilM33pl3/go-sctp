@@ -391,6 +391,9 @@ func TestSCTPAssocStatusAndPeelOff(t *testing.T) {
 
 	ids, err := cli.AssocIDs()
 	if err != nil {
+		if errors.Is(err, syscall.ENOPROTOOPT) || errors.Is(err, syscall.EOPNOTSUPP) {
+			t.Skipf("SCTP assoc id listing unavailable: %v", err)
+		}
 		t.Fatalf("AssocIDs error: %v", err)
 	}
 	if len(ids) == 0 || ids[0] == 0 {
@@ -481,6 +484,9 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 	}
 	ids, err := cli.AssocIDs()
 	if err != nil {
+		if errors.Is(err, syscall.ENOPROTOOPT) || errors.Is(err, syscall.EOPNOTSUPP) {
+			t.Skipf("SCTP assoc id listing unavailable: %v", err)
+		}
 		t.Fatalf("AssocIDs error: %v", err)
 	}
 	if len(ids) == 0 {
