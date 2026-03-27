@@ -120,7 +120,55 @@ type SCTPRcvInfo struct {
 	CumTSN  uint32
 	Context uint32
 	AssocID int32
+	Next    *SCTPNxtInfo
 }
+
+// SCTPNxtInfo exposes SCTP next-message metadata returned by recvmsg ancillary
+// data when SCTP_RECVNXTINFO is enabled.
+type SCTPNxtInfo struct {
+	Stream  uint16
+	Flags   uint16
+	PPID    uint32
+	Length  uint32
+	AssocID int32
+}
+
+// SCTPRTOInfo configures SCTP association retransmission timeout parameters.
+type SCTPRTOInfo struct {
+	AssocID int32
+	Initial uint32
+	Max     uint32
+	Min     uint32
+}
+
+// SCTPAssocStatus exposes the current status of an SCTP association.
+type SCTPAssocStatus struct {
+	AssocID            int32
+	State              int32
+	RWND               uint32
+	UnackedData        uint16
+	PendingData        uint16
+	InStreams          uint16
+	OutStreams         uint16
+	FragmentationPoint uint32
+	PrimaryAddr        SCTPAddr
+	PrimaryState       int32
+	PrimaryCWND        uint32
+	PrimarySRTT        uint32
+	PrimaryRTO         uint32
+	PrimaryMTU         uint32
+}
+
+const (
+	// SCTPUnordered requests unordered SCTP delivery for a sent message.
+	SCTPUnordered = 1 << 0
+
+	// SCTPStreamResetIncoming enables or requests incoming stream reset support.
+	SCTPStreamResetIncoming = 0x01
+
+	// SCTPStreamResetOutgoing enables or requests outgoing stream reset support.
+	SCTPStreamResetOutgoing = 0x02
+)
 
 // SCTPEventMask configures SCTP event subscriptions via SCTP_EVENT.
 type SCTPEventMask struct {
@@ -172,6 +220,9 @@ func (c *SCTPConn) ReadFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCT
 		return 0, 0, 0, nil, nil, syscall.EINVAL
 	}
 	n, oobn, flags, addr, info, err = c.readFromSCTP(b)
+	if info != nil && info.AssocID != 0 && c.assocID == 0 {
+		c.assocID = info.AssocID
+	}
 	if err != nil {
 		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -239,12 +290,221 @@ func (c *SCTPConn) SubscribeEvents(mask SCTPEventMask) error {
 	return nil
 }
 
+// SetRTOInfo controls SCTP_RTOINFO on the socket or association.
+func (c *SCTPConn) SetRTOInfo(info SCTPRTOInfo) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPRTOInfo(c, info); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetDefaultSendInfo controls SCTP_DEFAULT_SNDINFO on the socket.
+func (c *SCTPConn) SetDefaultSendInfo(info SCTPSndInfo) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPDefaultSendInfo(c, info); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetRecvRcvInfo controls SCTP_RECVRCVINFO on the socket.
+func (c *SCTPConn) SetRecvRcvInfo(on bool) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPRecvRcvInfo(c.fd, on); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetRecvNxtInfo controls SCTP_RECVNXTINFO on the socket.
+func (c *SCTPConn) SetRecvNxtInfo(on bool) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPRecvNxtInfo(c.fd, on); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetAutoClose controls SCTP_AUTOCLOSE on the socket.
+func (c *SCTPConn) SetAutoClose(seconds uint32) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPAutoClose(c.fd, seconds); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// BindAddrs adds local SCTP bind addresses on the socket.
+func (c *SCTPConn) BindAddrs(addrs []SCTPAddr) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	addrs = c.normalizeLocalAddrs(addrs)
+	if err := bindAddrsSCTP(c.fd, addrs); err != nil {
+		return &OpError{Op: "bind", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	c.multiLocal = mergeUniqueSCTPAddrs(c.multiLocal, addrs)
+	return nil
+}
+
+// UnbindAddrs removes local SCTP bind addresses from the socket.
+func (c *SCTPConn) UnbindAddrs(addrs []SCTPAddr) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	addrs = c.normalizeLocalAddrs(addrs)
+	if err := unbindAddrsSCTP(c.fd, addrs); err != nil {
+		return &OpError{Op: "bind", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	c.multiLocal = subtractSCTPAddrs(c.multiLocal, addrs)
+	return nil
+}
+
+// SetPrimaryAddr requests that the local SCTP stack use addr as the primary
+// peer destination for the current association.
+func (c *SCTPConn) SetPrimaryAddr(addr *SCTPAddr) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPPrimaryAddr(c, addr); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.opAddr(), Err: err}
+	}
+	return nil
+}
+
+// SetPeerPrimaryAddr requests that the peer use addr as its primary destination
+// for the current association.
+func (c *SCTPConn) SetPeerPrimaryAddr(addr *SCTPAddr) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPPeerPrimaryAddr(c, addr); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.opAddr(), Err: err}
+	}
+	return nil
+}
+
+// PeelOff peels an SCTP association onto a dedicated socket.
+func (c *SCTPConn) PeelOff(assocID int32) (*SCTPConn, error) {
+	if !c.ok() {
+		return nil, syscall.EINVAL
+	}
+	conn, err := peelOffSCTP(c, assocID)
+	if err != nil {
+		return nil, &OpError{Op: "peeloff", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return conn, nil
+}
+
+// AssocIDs returns the current SCTP association ids present on the socket.
+func (c *SCTPConn) AssocIDs() ([]int32, error) {
+	if !c.ok() {
+		return nil, syscall.EINVAL
+	}
+	ids, err := assocIDsSCTP(c.fd)
+	if err != nil {
+		return nil, &OpError{Op: "get", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return ids, nil
+}
+
+// AssocStatus returns status information for an SCTP association.
+func (c *SCTPConn) AssocStatus(assocID int32) (*SCTPAssocStatus, error) {
+	if !c.ok() {
+		return nil, syscall.EINVAL
+	}
+	status, err := assocStatusSCTP(c, assocID)
+	if err != nil {
+		return nil, &OpError{Op: "get", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return status, nil
+}
+
+// EnableStreamReset enables SCTP stream reconfiguration support on the socket.
+func (c *SCTPConn) EnableStreamReset(flags uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := enableSCTPStreamReset(c, flags); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// ResetStreams requests SCTP stream reset on the current association.
+func (c *SCTPConn) ResetStreams(flags uint16, streams []uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := resetSCTPStreams(c, flags, streams); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// AddStreams requests additional SCTP inbound or outbound streams.
+func (c *SCTPConn) AddStreams(in, out uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := addSCTPStreams(c, in, out); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+func (c *SCTPConn) normalizeLocalAddrs(addrs []SCTPAddr) []SCTPAddr {
+	if len(addrs) == 0 {
+		return nil
+	}
+	out := copySCTPAddrs(addrs)
+	la, _ := c.LocalAddr().(*SCTPAddr)
+	if la == nil || la.Port == 0 {
+		return out
+	}
+	for i := range out {
+		if out[i].Port == 0 {
+			out[i].Port = la.Port
+		}
+	}
+	return out
+}
+
 // DialSCTP acts like [Dial] for SCTP networks.
 func DialSCTP(network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	return dialSCTP(context.Background(), nil, network, laddr, raddr)
 }
 
 func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+	c, err := openDialSCTP(ctx, dialer, network, laddr, raddr)
+	if err != nil {
+		return nil, err
+	}
+	if assocID, err := connectAddrsSCTP(c.fd, []SCTPAddr{*raddr}); err != nil {
+		c.Close()
+		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+	} else if assocID != 0 {
+		c.assocID = assocID
+	}
+	c.multiPeer = []SCTPAddr{*raddr}
+	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+		c.multiLocal = []SCTPAddr{*la}
+	}
+	return c, nil
+}
+
+func openDialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	switch network {
 	case "sctp", "sctp4", "sctp6":
 	default:
@@ -260,10 +520,6 @@ func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr 
 	c, err := sd.dialSCTP(ctx, laddr, raddr)
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-	}
-	c.multiPeer = []SCTPAddr{*raddr}
-	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
 	}
 	return c, nil
 }

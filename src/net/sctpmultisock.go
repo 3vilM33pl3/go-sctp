@@ -55,6 +55,46 @@ func copySCTPAddrs(in []SCTPAddr) []SCTPAddr {
 	return out
 }
 
+func mergeUniqueSCTPAddrs(existing, added []SCTPAddr) []SCTPAddr {
+	if len(added) == 0 {
+		return copySCTPAddrs(existing)
+	}
+	out := copySCTPAddrs(existing)
+	for _, addr := range added {
+		var seen bool
+		for i := range out {
+			if out[i].String() == addr.String() {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
+func subtractSCTPAddrs(existing, removed []SCTPAddr) []SCTPAddr {
+	if len(existing) == 0 || len(removed) == 0 {
+		return copySCTPAddrs(existing)
+	}
+	out := make([]SCTPAddr, 0, len(existing))
+	for _, addr := range existing {
+		var drop bool
+		for i := range removed {
+			if addr.String() == removed[i].String() {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
 // ResolveSCTPMultiAddr resolves a list of SCTP endpoint addresses.
 func ResolveSCTPMultiAddr(network string, addresses []string) (*SCTPMultiAddr, error) {
 	switch network {
@@ -161,9 +201,15 @@ func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, r
 	}
 	ra = &raddr.Addrs[0]
 
-	c, err := dialSCTP(ctx, dialer, network, la, ra)
+	c, err := openDialSCTP(ctx, dialer, network, la, ra)
 	if err != nil {
 		return nil, err
+	}
+	if assocID, err := connectAddrsSCTP(c.fd, raddr.Addrs); err != nil {
+		c.Close()
+		return nil, &OpError{Op: "dial", Net: network, Source: la.opAddr(), Addr: ra.opAddr(), Err: err}
+	} else if assocID != 0 {
+		c.assocID = assocID
 	}
 	c.multiPeer = copySCTPAddrs(raddr.Addrs)
 	if laddr != nil && len(laddr.Addrs) > 1 {
@@ -191,12 +237,6 @@ func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, r
 		}
 	}
 	if len(raddr.Addrs) > 1 {
-		assocID, err := connectAddrsSCTP(c.fd, raddr.Addrs)
-		if err != nil {
-			c.Close()
-			return nil, &OpError{Op: "dial", Net: network, Source: la.opAddr(), Addr: ra.opAddr(), Err: err}
-		}
-		c.assocID = assocID
 		// Prefer a non-primary destination as the default send target to avoid
 		// getting pinned to an unavailable first address in multi-homed lists.
 		fallback := raddr.Addrs[1]
@@ -272,6 +312,12 @@ func (c *SCTPConn) LocalAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
+	if c.assocID != 0 {
+		if addrs, err := localAddrsSCTP(c.fd, c.assocID); err == nil && len(addrs) > 0 {
+			c.multiLocal = copySCTPAddrs(addrs)
+			return addrs, nil
+		}
+	}
 	if len(c.multiLocal) > 0 {
 		return copySCTPAddrs(c.multiLocal), nil
 	}
@@ -285,6 +331,12 @@ func (c *SCTPConn) LocalAddrs() ([]SCTPAddr, error) {
 func (c *SCTPConn) PeerAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
+	}
+	if c.assocID != 0 {
+		if addrs, err := peerAddrsSCTP(c.fd, c.assocID); err == nil && len(addrs) > 0 {
+			c.multiPeer = copySCTPAddrs(addrs)
+			return addrs, nil
+		}
 	}
 	if len(c.multiPeer) > 0 {
 		return copySCTPAddrs(c.multiPeer), nil
