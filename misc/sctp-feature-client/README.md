@@ -7,8 +7,9 @@ The client:
 
 - fetches the live feature catalog from the server
 - creates a session
-- executes the currently supported scenarios with the in-tree Go SCTP API
-- explicitly marks unsupported features with evidence text
+- executes the current SCTP conformance catalog with the in-tree Go SCTP API
+- leaves only unknown future server feature ids to the generic `unsupported`
+  fallback
 
 ## Build
 
@@ -38,20 +39,29 @@ Implemented now:
 - basic send scenarios
 - `SCTP_NODELAY`
 - `SCTP_INITMSG`
+- `SCTP_RTOINFO`
+- `SCTP_DEFAULT_SNDINFO`
+- `SCTP_RECVRCVINFO`
+- `SCTP_RECVNXTINFO`
+- `SCTP_AUTOCLOSE`
 - notification scenarios
 - multihome connect
+- bindx add/remove on a pre-connected client socket
 - local and peer address enumeration
+- primary-address management
+- peer primary-address request
+- association peeloff
+- association id listing
+- association status
+- stream reset enable/request
+- stream add-stream reconfiguration
 - invalid-target error path
 - unordered delivery attempt via `SCTPSndInfo.Flags`
 
-Explicitly unsupported now:
+## Validation Notes
 
-- `SCTP_RTOINFO`
-- default sndinfo socket options
-- `SCTP_RECVNXTINFO`
-- `SCTP_AUTOCLOSE`
-- bindx add/remove
-- primary-address management
-- peeloff
-- assoc status / assoc-id listing
-- stream reconfiguration
+- Local validation runs with:
+  - `GOROOT=$(pwd) ./bin/go test net -run '^TestSCTP' -count=1`
+  - `GO111MODULE=off GOROOT=$(pwd) ./bin/go test ./misc/sctp-feature-client/go -count=1`
+- Full end-to-end validation against the FreeBSD reference server still requires
+  a Linux host with real SCTP reachability to `free.metatao.net`.
