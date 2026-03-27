@@ -63,12 +63,40 @@ func setNoDelaySCTP(*netFD, bool) error { return errSCTPUnsupported }
 
 func setSCTPInitOptions(*netFD, SCTPInitOptions) error { return errSCTPUnsupported }
 
+func setSCTPRecvRcvInfo(*netFD, bool) error { return errSCTPUnsupported }
+
+func setSCTPRecvNxtInfo(*netFD, bool) error { return errSCTPUnsupported }
+
+func setSCTPAutoClose(*netFD, uint32) error { return errSCTPUnsupported }
+
+func setSCTPRTOInfo(*SCTPConn, SCTPRTOInfo) error { return errSCTPUnsupported }
+
+func setSCTPDefaultSendInfo(*SCTPConn, SCTPSndInfo) error { return errSCTPUnsupported }
+
 func subscribeSCTPEvents(*netFD, SCTPEventMask) error { return errSCTPUnsupported }
 
 func bindAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
+
+func unbindAddrsSCTP(*netFD, []SCTPAddr) error { return errSCTPUnsupported }
 
 func connectAddrsSCTP(*netFD, []SCTPAddr) (int32, error) { return 0, errSCTPUnsupported }
 
 func localAddrsSCTP(*netFD, int32) ([]SCTPAddr, error) { return nil, errSCTPUnsupported }
 
 func peerAddrsSCTP(*netFD, int32) ([]SCTPAddr, error) { return nil, errSCTPUnsupported }
+
+func setSCTPPrimaryAddr(*SCTPConn, *SCTPAddr) error { return errSCTPUnsupported }
+
+func setSCTPPeerPrimaryAddr(*SCTPConn, *SCTPAddr) error { return errSCTPUnsupported }
+
+func peelOffSCTP(*SCTPConn, int32) (*SCTPConn, error) { return nil, errSCTPUnsupported }
+
+func assocIDsSCTP(*netFD) ([]int32, error) { return nil, errSCTPUnsupported }
+
+func assocStatusSCTP(*SCTPConn, int32) (*SCTPAssocStatus, error) { return nil, errSCTPUnsupported }
+
+func enableSCTPStreamReset(*SCTPConn, uint16) error { return errSCTPUnsupported }
+
+func resetSCTPStreams(*SCTPConn, uint16, []uint16) error { return errSCTPUnsupported }
+
+func addSCTPStreams(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported }
