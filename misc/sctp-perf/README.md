@@ -28,7 +28,7 @@ The harness executes the full ordered matrix for each mode:
 ## Run
 
 ```bash
-cd /home/olivier/Projects/sctp/go-sctp-linux
+cd /home/olivier/Projects/sctp/go-sctp
 ./misc/sctp-perf/harness/run_perf_matrix.sh
 ```
 

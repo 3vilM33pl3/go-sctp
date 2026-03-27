@@ -126,7 +126,7 @@ func parseFlags(args []string) (cliConfig, error) {
 	var features string
 	fs.StringVar(&cfg.baseURL, "base-url", "", "HTTP base URL of the SCTP feature server")
 	fs.StringVar(&cfg.agentName, "agent-name", "go-sctp-feature-client", "agent name reported to the server")
-	fs.StringVar(&cfg.environmentName, "environment-name", "go-sctp-linux", "environment name reported to the server")
+	fs.StringVar(&cfg.environmentName, "environment-name", "go-sctp", "environment name reported to the server")
 	fs.StringVar(&features, "features", "", "optional comma-separated feature allowlist")
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err

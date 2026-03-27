@@ -50,62 +50,62 @@ var unsupportedFeatureSpecs = map[string]unsupportedSpec{
 	"rto_assoc_parameters": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP_RTOINFO in the current public SCTP client API",
+		EvidenceText: "go-sctp does not expose SCTP_RTOINFO in the current public SCTP client API",
 	},
 	"default_sndinfo_recvrcvinfo": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux exposes per-message SCTPSndInfo but not a socket-level SCTP_DEFAULT_SNDINFO setter",
+		EvidenceText: "go-sctp exposes per-message SCTPSndInfo but not a socket-level SCTP_DEFAULT_SNDINFO setter",
 	},
 	"recvnxtinfo": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP_RECVNXTINFO or next-message metadata in the current API",
+		EvidenceText: "go-sctp does not expose SCTP_RECVNXTINFO or next-message metadata in the current API",
 	},
 	"autoclose": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP_AUTOCLOSE in the current public SCTP client API",
+		EvidenceText: "go-sctp does not expose SCTP_AUTOCLOSE in the current public SCTP client API",
 	},
 	"bindx_add_remove": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux can dial multi-address associations but does not expose SCTP_BINDX add/remove controls for the client socket",
+		EvidenceText: "go-sctp can dial multi-address associations but does not expose SCTP_BINDX add/remove controls for the client socket",
 	},
 	"primary_addr_management": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose local primary-address management in the current SCTP client API",
+		EvidenceText: "go-sctp does not expose local primary-address management in the current SCTP client API",
 	},
 	"peer_primary_addr_request": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose peer primary-address request controls in the current SCTP client API",
+		EvidenceText: "go-sctp does not expose peer primary-address request controls in the current SCTP client API",
 	},
 	"peeloff_assoc": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP peeloff in the current public SCTP client API",
+		EvidenceText: "go-sctp does not expose SCTP peeloff in the current public SCTP client API",
 	},
 	"assoc_id_listing": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose association identifier listing in the current SCTP client API",
+		EvidenceText: "go-sctp does not expose association identifier listing in the current SCTP client API",
 	},
 	"assoc_status_opt_info": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP_STATUS or sctp_opt_info-style association status queries in the current API",
+		EvidenceText: "go-sctp does not expose SCTP_STATUS or sctp_opt_info-style association status queries in the current API",
 	},
 	"stream_reconfig_reset": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP stream reset controls in the current public SCTP client API",
+		EvidenceText: "go-sctp does not expose SCTP stream reset controls in the current public SCTP client API",
 	},
 	"stream_reconfig_add_streams": {
 		Reason:       "missing API",
 		EvidenceKind: "client_gap",
-		EvidenceText: "go-sctp-linux does not expose SCTP add-stream reconfiguration controls in the current public SCTP client API",
+		EvidenceText: "go-sctp does not expose SCTP add-stream reconfiguration controls in the current public SCTP client API",
 	},
 }
 
@@ -123,7 +123,7 @@ func (r *runner) runFeature(ctx context.Context, sessionID string, feature catal
 		return r.client.unsupportedFeature(ctx, sessionID, feature.ID, unsupportedPayload{
 			Reason:       "unmapped feature",
 			EvidenceKind: "client_gap",
-			EvidenceText: "the go-sctp-linux feature client does not implement this feature id",
+			EvidenceText: "the go-sctp feature client does not implement this feature id",
 		})
 	}
 

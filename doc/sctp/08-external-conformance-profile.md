@@ -59,7 +59,7 @@ sudo apt-get install -y lksctp-tools lksctp-tools-dev cmake gcc g++ make git
 Run all commands from:
 
 ```bash
-cd /home/olivier/Projects/sctp/go-sctp-linux
+cd /home/olivier/Projects/sctp/go-sctp
 ```
 
 ### Phase A: Project Baseline (already in-repo)

@@ -12,7 +12,7 @@ The client:
 
 ## Build
 
-Run from the `go-sctp-linux` repository root:
+Run from the `go-sctp` repository root:
 
 ```bash
 GOROOT=$(pwd) ./bin/go build ./misc/sctp-feature-client/go
