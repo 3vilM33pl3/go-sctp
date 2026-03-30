@@ -54,24 +54,30 @@ func TestScenarioCatalogIsWellFormed(t *testing.T) {
 	}
 }
 
-func TestClientFeatureManifestMatchesScenarioCatalog(t *testing.T) {
-	manifest := clientFeatureManifest()
-	if len(manifest) != len(scenarioCatalog) {
-		t.Fatalf("len(manifest)=%d, want %d", len(manifest), len(scenarioCatalog))
+func TestScenarioSummariesMatchScenarioCatalog(t *testing.T) {
+	summaries := scenarioSummaries()
+	if len(summaries) != len(scenarioCatalog) {
+		t.Fatalf("len(summaries)=%d, want %d", len(summaries), len(scenarioCatalog))
 	}
-	for i, entry := range manifest {
+	for i, entry := range summaries {
 		scenario := scenarioCatalog[i]
 		if entry.FeatureID != scenario.FeatureID {
-			t.Fatalf("manifest[%d].FeatureID=%q, want %q", i, entry.FeatureID, scenario.FeatureID)
+			t.Fatalf("summaries[%d].FeatureID=%q, want %q", i, entry.FeatureID, scenario.FeatureID)
+		}
+		if entry.DashboardTitle != scenario.DashboardTitle {
+			t.Fatalf("summaries[%d].DashboardTitle=%q, want %q", i, entry.DashboardTitle, scenario.DashboardTitle)
+		}
+		if entry.DashboardCategory != scenario.DashboardCategory {
+			t.Fatalf("summaries[%d].DashboardCategory=%q, want %q", i, entry.DashboardCategory, scenario.DashboardCategory)
 		}
 		if entry.ImplementationKey != scenario.ImplementationKey {
-			t.Fatalf("manifest[%d].ImplementationKey=%q, want %q", i, entry.ImplementationKey, scenario.ImplementationKey)
+			t.Fatalf("summaries[%d].ImplementationKey=%q, want %q", i, entry.ImplementationKey, scenario.ImplementationKey)
 		}
 		if entry.SourceSymbol != scenario.SourceSymbol {
-			t.Fatalf("manifest[%d].SourceSymbol=%q, want %q", i, entry.SourceSymbol, scenario.SourceSymbol)
+			t.Fatalf("summaries[%d].SourceSymbol=%q, want %q", i, entry.SourceSymbol, scenario.SourceSymbol)
 		}
 		if entry.SourcePath == "" || entry.Description == "" {
-			t.Fatalf("manifest[%d] missing path or description: %+v", i, entry)
+			t.Fatalf("summaries[%d] missing path or description: %+v", i, entry)
 		}
 	}
 }

@@ -13,6 +13,7 @@ type cliConfig struct {
 	baseURL         string
 	agentName       string
 	environmentName string
+	listScenarios   bool
 	featureFilter   map[string]bool
 }
 
@@ -44,6 +45,10 @@ func run() int {
 	}
 
 	client := newFeatureServerClient(cfg.baseURL)
+	if cfg.listScenarios {
+		emitJSON(scenarioSummaries())
+		return 0
+	}
 	if err := client.healthz(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "healthz: %v\n", err)
 		return 1
@@ -55,7 +60,7 @@ func run() int {
 		return 1
 	}
 
-	session, err := client.createSession(context.Background(), cfg.agentName, cfg.environmentName, clientFeatureManifest())
+	session, err := client.createSession(context.Background(), cfg.agentName, cfg.environmentName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create session: %v\n", err)
 		return 1
@@ -127,11 +132,12 @@ func parseFlags(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.baseURL, "base-url", "", "HTTP base URL of the SCTP feature server")
 	fs.StringVar(&cfg.agentName, "agent-name", "go-sctp-feature-client", "agent name reported to the server")
 	fs.StringVar(&cfg.environmentName, "environment-name", "go-sctp", "environment name reported to the server")
+	fs.BoolVar(&cfg.listScenarios, "list-scenarios", false, "print the client scenario map keyed by feature_id and exit")
 	fs.StringVar(&features, "features", "", "optional comma-separated feature allowlist")
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
 	}
-	if cfg.baseURL == "" {
+	if cfg.baseURL == "" && !cfg.listScenarios {
 		return cliConfig{}, fmt.Errorf("--base-url is required")
 	}
 	cfg.featureFilter = parseFeatureFilter(features)
