@@ -907,17 +907,22 @@ func handleOneToManyMultiAssoc(ctx context.Context, _ *runner, contract *scenari
 	if err != nil {
 		return nil, err
 	}
-	localBase, _, err := selectBindxLocalAddrs(&targets[0])
-	if err != nil {
-		return nil, err
-	}
-	conn, err := net.OpenSCTP(contract.Transport, localBase)
+	conn, err := net.OpenSCTP(contract.Transport, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
 	if err := conn.SetInitOptions(net.SCTPInitOptions{NumOStreams: 32, MaxInStreams: 32}); err != nil {
+		return nil, err
+	}
+	for i := 0; i < contract.OneToMany.ExpectedAssociations; i++ {
+		if err := addOneToManyAssociation(conn, &targets[i]); err != nil {
+			return nil, err
+		}
+	}
+	ids, err := waitForOneToManyAssocIDs(conn, contract.OneToMany.ExpectedAssociations, time.Now().Add(5*time.Second))
+	if err != nil {
 		return nil, err
 	}
 	for i := 0; i < contract.OneToMany.ExpectedAssociations; i++ {
@@ -935,23 +940,9 @@ func handleOneToManyMultiAssoc(ctx context.Context, _ *runner, contract *scenari
 		}
 	}
 
-	deadline := time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)
-	var ids []int32
-	for time.Now().Before(deadline) {
-		ids, err = conn.AssocIDs()
-		if err == nil {
-			ids = distinctNonZeroAssocIDs(ids)
-			if len(ids) >= contract.OneToMany.ExpectedAssociations {
-				break
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	ids, err = waitForOneToManyAssocIDs(conn, contract.OneToMany.ExpectedAssociations, time.Now().Add(time.Duration(contract.TimeoutSeconds)*time.Second))
 	if err != nil {
 		return nil, err
-	}
-	if len(ids) < contract.OneToMany.ExpectedAssociations {
-		return nil, fmt.Errorf("observed %d association ids on one-to-many socket; want %d", len(ids), contract.OneToMany.ExpectedAssociations)
 	}
 	slices.Sort(ids)
 	reportIDs := make([]string, 0, contract.OneToMany.ExpectedAssociations)
@@ -1805,6 +1796,50 @@ func distinctNonZeroAssocIDs(ids []int32) []int32 {
 		out = append(out, id)
 	}
 	return out
+}
+
+func waitForOneToManyAssocIDs(conn *net.SCTPConn, want int, deadline time.Time) ([]int32, error) {
+	var last []int32
+	for time.Now().Before(deadline) {
+		ids, err := conn.AssocIDs()
+		if err == nil {
+			last = distinctNonZeroAssocIDs(ids)
+			if len(last) >= want {
+				return last, nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return last, fmt.Errorf("observed %d association ids on one-to-many socket; want %d", len(last), want)
+}
+
+func addOneToManyAssociation(conn *net.SCTPConn, addr *net.SCTPAddr) error {
+	if addr == nil {
+		return fmt.Errorf("missing SCTP peer address")
+	}
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var controlErr error
+	if err := raw.Control(func(fd uintptr) {
+		ip4 := addr.IP.To4()
+		if ip4 == nil {
+			controlErr = fmt.Errorf("only IPv4 one-to-many association setup is currently implemented")
+			return
+		}
+		sa := &syscall.SockaddrInet4{Port: addr.Port}
+		copy(sa.Addr[:], ip4)
+		if err := syscall.Connect(int(fd), sa); err != nil {
+			if err == syscall.EINPROGRESS || err == syscall.EALREADY || err == syscall.EISCONN {
+				return
+			}
+			controlErr = err
+		}
+	}); err != nil {
+		return err
+	}
+	return controlErr
 }
 
 func (n notificationSummary) renderedFlags() string {
