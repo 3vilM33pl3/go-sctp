@@ -61,7 +61,11 @@ var scenarioCatalog = []scenarioDefinition{
 	{"nodelay", "SCTP_NODELAY", "socket_option", "nodelay", "handleNoDelay", "Enable SCTP_NODELAY before sending the probe payload.", handleNoDelay},
 	{"initmsg", "SCTP_INITMSG", "socket_option", "initmsg", "handleInitMsg", "Apply SCTP_INITMSG before association setup and then send the probe payload.", handleInitMsg},
 	{"rto_assoc_parameters", "SCTP_RTOINFO", "socket_option", "rto_info", "handleRTOInfo", "Apply association RTO parameters and send the probe payload.", handleRTOInfo},
+	{"delayed_sack_tuning", "SCTP_DELAYED_SACK", "socket_option", "delayed_sack", "handleDelayedSackTuning", "Apply delayed-SACK tuning before sending the probe payload.", handleDelayedSackTuning},
+	{"max_burst_tuning", "SCTP_MAX_BURST", "socket_option", "max_burst", "handleMaxBurstTuning", "Apply max-burst tuning before sending the probe payload.", handleMaxBurstTuning},
 	{"default_sndinfo_recvrcvinfo", "SCTP_DEFAULT_SNDINFO / RECVRCVINFO", "metadata", "default_send_info", "handleDefaultSendInfo", "Set default send metadata and confirm it via RECVRCVINFO.", handleDefaultSendInfo},
+	{"large_message_reassembly", "Large message reassembly", "fragmentation", "basic_send", "handleBasicSend", "Send one large SCTP user message and rely on the server to verify reassembly and boundary preservation.", handleBasicSend},
+	{"maxseg_fragmentation", "SCTP_MAXSEG fragmentation", "fragmentation", "maxseg_fragmentation", "handleMaxSegFragmentation", "Apply SCTP_MAXSEG and send one large SCTP user message.", handleMaxSegFragmentation},
 	{"unordered_delivery", "Unordered delivery", "messaging", "unordered_delivery", "handleUnorderedDelivery", "Attempt unordered SCTP delivery and report whether the environment accepts it.", handleUnorderedDelivery},
 	{"recvnxtinfo", "SCTP_RECVNXTINFO", "metadata", "recv_nxtinfo", "handleRecvNxtInfo", "Receive two server messages and report next-message metadata from the first receive.", handleRecvNxtInfo},
 	{"autoclose", "SCTP_AUTOCLOSE", "socket_option", "autoclose", "handleAutoClose", "Attempt to configure SCTP_AUTOCLOSE on the client socket and report whether it is accepted.", handleAutoClose},
@@ -291,6 +295,56 @@ func handleRTOInfo(ctx context.Context, _ *runner, contract *scenarioContract) (
 	}, nil
 }
 
+func handleDelayedSackTuning(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if contract.SocketTuning == nil {
+		return nil, fmt.Errorf("feature %s did not provide socket_tuning", contract.FeatureID)
+	}
+	info := net.SCTPDelayedSackInfo{
+		Delay:     contract.SocketTuning.DelayedSackDelayMS,
+		Frequency: contract.SocketTuning.DelayedSackFreq,
+	}
+	if err := conn.SetDelayedSack(info); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetDelayedSack succeeded with delay_ms=%d freq=%d", info.Delay, info.Frequency),
+		ReportText:   fmt.Sprintf("client applied SCTP_DELAYED_SACK delay_ms=%d freq=%d", info.Delay, info.Frequency),
+	}, nil
+}
+
+func handleMaxBurstTuning(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if contract.SocketTuning == nil || contract.SocketTuning.MaxBurst == 0 {
+		return nil, fmt.Errorf("feature %s did not provide socket_tuning.max_burst", contract.FeatureID)
+	}
+	if err := conn.SetMaxBurst(contract.SocketTuning.MaxBurst); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetMaxBurst succeeded with value=%d", contract.SocketTuning.MaxBurst),
+		ReportText:   fmt.Sprintf("client applied SCTP_MAX_BURST=%d", contract.SocketTuning.MaxBurst),
+	}, nil
+}
+
 func handleDefaultSendInfo(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
 	conn, err := dialContract(contract)
 	if err != nil {
@@ -316,6 +370,29 @@ func handleDefaultSendInfo(ctx context.Context, _ *runner, contract *scenarioCon
 		EvidenceKind: "runtime",
 		EvidenceText: fmt.Sprintf("SetDefaultSendInfo succeeded with stream=%d ppid=%d and send used default metadata", msg.Stream, msg.PPID),
 		ReportText:   fmt.Sprintf("client applied SCTP_DEFAULT_SNDINFO stream=%d ppid=%d", msg.Stream, msg.PPID),
+	}, nil
+}
+
+func handleMaxSegFragmentation(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if contract.SocketTuning == nil || contract.SocketTuning.MaxSeg == 0 {
+		return nil, fmt.Errorf("feature %s did not provide socket_tuning.maxseg", contract.FeatureID)
+	}
+	if err := conn.SetMaxSeg(contract.SocketTuning.MaxSeg); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetMaxSeg succeeded with value=%d", contract.SocketTuning.MaxSeg),
+		ReportText:   fmt.Sprintf("client applied SCTP_MAXSEG=%d before sending the large message", contract.SocketTuning.MaxSeg),
 	}, nil
 }
 

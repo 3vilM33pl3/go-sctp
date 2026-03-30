@@ -92,6 +92,13 @@ type schedulerContract struct {
 	MessageCount    int    `json:"message_count"`
 }
 
+type socketTuningContract struct {
+	DelayedSackDelayMS uint32 `json:"delayed_sack_delay_ms,omitempty"`
+	DelayedSackFreq    uint32 `json:"delayed_sack_freq,omitempty"`
+	MaxBurst           uint32 `json:"max_burst,omitempty"`
+	MaxSeg             uint32 `json:"maxseg,omitempty"`
+}
+
 type scenarioContract struct {
 	FeatureID               string                   `json:"feature_id"`
 	CompletionMode          string                   `json:"completion_mode"`
@@ -112,6 +119,7 @@ type scenarioContract struct {
 	AddressReconfig         *addressReconfigContract `json:"address_reconfig,omitempty"`
 	Interleaving            *interleavingContract    `json:"interleaving,omitempty"`
 	Scheduler               *schedulerContract       `json:"scheduler,omitempty"`
+	SocketTuning            *socketTuningContract    `json:"socket_tuning,omitempty"`
 }
 
 type featureState struct {
