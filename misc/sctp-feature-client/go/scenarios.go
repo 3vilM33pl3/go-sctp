@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -775,15 +778,11 @@ func handlePRScenario(ctx context.Context, contract *scenarioContract, mode stri
 }
 
 func handleAuthRequiredChunks(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
-	conn, err := dialContract(contract)
+	conn, err := dialContractWithAuth(ctx, contract)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-
-	if err := applyAuthContract(conn, contract.Auth); err != nil {
-		return nil, err
-	}
 	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
@@ -795,17 +794,15 @@ func handleAuthRequiredChunks(ctx context.Context, _ *runner, contract *scenario
 }
 
 func handleAuthKeyRotation(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
-	conn, err := dialContract(contract)
+	conn, err := dialContractWithAuth(ctx, contract)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-
-	if err := applyAuthContract(conn, contract.Auth); err != nil {
-		return nil, err
-	}
 	if err := conn.ActivateAuthKey(0, contract.Auth.SecondaryKeyID); err != nil {
-		return nil, err
+		if err := rawActivateAuthKeyConn(conn, contract.Auth.SecondaryKeyID); err != nil {
+			return nil, err
+		}
 	}
 	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
@@ -1043,6 +1040,36 @@ func dialContract(contract *scenarioContract) (*net.SCTPConn, error) {
 	})
 }
 
+func dialContractWithAuth(ctx context.Context, contract *scenarioContract) (*net.SCTPConn, error) {
+	if contract.Auth == nil {
+		return nil, fmt.Errorf("missing auth contract")
+	}
+	if len(contract.ConnectAddresses) == 0 {
+		return nil, fmt.Errorf("feature %s did not provide connect addresses", contract.FeatureID)
+	}
+	dialer := net.Dialer{
+		ControlContext: func(_ context.Context, network, address string, c syscall.RawConn) error {
+			var controlErr error
+			if err := c.Control(func(fd uintptr) {
+				controlErr = rawConfigureAuthSocket(int(fd), contract.Auth)
+			}); err != nil {
+				return err
+			}
+			return controlErr
+		},
+	}
+	conn, err := dialer.DialContext(ctx, contract.Transport, contract.ConnectAddresses[0])
+	if err != nil {
+		return nil, err
+	}
+	sctpConn, ok := conn.(*net.SCTPConn)
+	if !ok {
+		conn.Close()
+		return nil, fmt.Errorf("DialContext returned %T, want *net.SCTPConn", conn)
+	}
+	return sctpConn, nil
+}
+
 func materializeMessagePayload(msg messageSpec) string {
 	if msg.SizeBytes <= 0 || msg.SizeBytes <= len(msg.Payload) {
 		return msg.Payload
@@ -1119,6 +1146,98 @@ func applyAuthContract(conn *net.SCTPConn, auth *authContract) error {
 		}
 	}
 	return nil
+}
+
+const (
+	rawSCTPSockoptAuthChunk     = 21
+	rawSCTPSockoptAuthKey       = 23
+	rawSCTPSockoptAuthActiveKey = 24
+)
+
+type rawSCTPAuthChunk struct {
+	Chunk uint8
+}
+
+type rawSCTPAuthKeyHeader struct {
+	AssocID   int32
+	KeyID     uint16
+	KeyLength uint16
+}
+
+type rawSCTPAuthKeyID struct {
+	AssocID int32
+	KeyID   uint16
+}
+
+func rawSetSockoptBytes(fd, level, name int, value []byte) error {
+	var ptr unsafe.Pointer
+	if len(value) > 0 {
+		ptr = unsafe.Pointer(&value[0])
+	}
+	_, _, errno := syscall.Syscall6(
+		syscall.SYS_SETSOCKOPT,
+		uintptr(fd),
+		uintptr(level),
+		uintptr(name),
+		uintptr(ptr),
+		uintptr(len(value)),
+		0,
+	)
+	if errno != 0 {
+		return os.NewSyscallError("setsockopt", errno)
+	}
+	return nil
+}
+
+func rawConfigureAuthSocket(fd int, auth *authContract) error {
+	for _, chunk := range auth.ChunkTypes {
+		raw := rawSCTPAuthChunk{Chunk: chunk}
+		if err := rawSetSockoptBytes(fd, syscall.IPPROTO_SCTP, rawSCTPSockoptAuthChunk, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), int(unsafe.Sizeof(raw)))); err != nil {
+			return err
+		}
+	}
+	if err := rawInstallAuthKey(fd, auth.PrimaryKeyID, auth.PrimarySecret); err != nil {
+		return err
+	}
+	if auth.SecondaryKeyID != 0 || auth.SecondarySecret != "" {
+		if err := rawInstallAuthKey(fd, auth.SecondaryKeyID, auth.SecondarySecret); err != nil {
+			return err
+		}
+	}
+	if auth.PrimaryKeyID != 0 {
+		if err := rawActivateAuthKeyFD(fd, auth.PrimaryKeyID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rawInstallAuthKey(fd int, keyID uint16, secret string) error {
+	buf := make([]byte, int(unsafe.Sizeof(rawSCTPAuthKeyHeader{}))+len(secret))
+	hdr := (*rawSCTPAuthKeyHeader)(unsafe.Pointer(&buf[0]))
+	hdr.KeyID = keyID
+	hdr.KeyLength = uint16(len(secret))
+	copy(buf[int(unsafe.Sizeof(rawSCTPAuthKeyHeader{})):], []byte(secret))
+	return rawSetSockoptBytes(fd, syscall.IPPROTO_SCTP, rawSCTPSockoptAuthKey, buf)
+}
+
+func rawActivateAuthKeyFD(fd int, keyID uint16) error {
+	raw := rawSCTPAuthKeyID{KeyID: keyID}
+	return rawSetSockoptBytes(fd, syscall.IPPROTO_SCTP, rawSCTPSockoptAuthActiveKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), int(unsafe.Sizeof(raw))))
+}
+
+func rawActivateAuthKeyConn(conn *net.SCTPConn, keyID uint16) error {
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var controlErr error
+	if err := raw.Control(func(fd uintptr) {
+		controlErr = rawActivateAuthKeyFD(int(fd), keyID)
+	}); err != nil {
+		return err
+	}
+	return controlErr
 }
 
 func applyMessageSendControls(conn *net.SCTPConn, msg messageSpec, contract *scenarioContract) error {
@@ -1211,7 +1330,7 @@ type notificationSummary struct {
 
 func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificationSummary, error) {
 	summary := notificationSummary{flags: make(map[int]int)}
-	buf := make([]byte, 4096)
+	buf := make([]byte, maxExpectedPayloadSize(expected))
 	receivedMessages := 0
 	for receivedMessages < len(expected) {
 		n, _, flags, _, info, err := conn.ReadFromSCTP(buf)
@@ -1252,6 +1371,17 @@ func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificatio
 		}
 	}
 	return summary, nil
+}
+
+func maxExpectedPayloadSize(expected []messageSpec) int {
+	maxSize := 4096
+	for _, msg := range expected {
+		size := len(materializeMessagePayload(msg))
+		if size > maxSize {
+			maxSize = size
+		}
+	}
+	return maxSize
 }
 
 func runTriggerAndRead(conn *net.SCTPConn, contract *scenarioContract) (notificationSummary, error) {
