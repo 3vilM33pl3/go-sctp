@@ -35,12 +35,13 @@ type catalogResponse struct {
 }
 
 type catalogFeature struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	Category       string `json:"category"`
-	Summary        string `json:"summary"`
-	CompletionMode string `json:"completion_mode"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
+	ID                  string `json:"id"`
+	Title               string `json:"title"`
+	Category            string `json:"category"`
+	Summary             string `json:"summary"`
+	CompletionMode      string `json:"completion_mode"`
+	TimeoutSeconds      int    `json:"timeout_seconds"`
+	ManualSetupRequired bool   `json:"manual_setup_required"`
 }
 
 type sessionResponse struct {

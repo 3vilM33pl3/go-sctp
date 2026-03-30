@@ -10,11 +10,12 @@ import (
 )
 
 type cliConfig struct {
-	baseURL         string
-	agentName       string
-	environmentName string
-	listScenarios   bool
-	featureFilter   map[string]bool
+	baseURL            string
+	agentName          string
+	environmentName    string
+	listScenarios      bool
+	includeManualSetup bool
+	featureFilter      map[string]bool
 }
 
 type featureEvent struct {
@@ -71,6 +72,16 @@ func run() int {
 	executed := 0
 	for _, feature := range catalog.Features {
 		if len(cfg.featureFilter) > 0 && !cfg.featureFilter[feature.ID] {
+			continue
+		}
+		if len(cfg.featureFilter) == 0 && feature.ManualSetupRequired && !cfg.includeManualSetup {
+			emitJSON(featureEvent{
+				Type:      "feature_skipped",
+				SessionID: session.SessionID,
+				FeatureID: feature.ID,
+				State:     "skipped",
+				Message:   "skipped by default because the feature requires manual host setup; rerun with --include-manual-setup or explicitly select it with --features",
+			})
 			continue
 		}
 		executed++
@@ -133,6 +144,7 @@ func parseFlags(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.agentName, "agent-name", "go-sctp-feature-client", "agent name reported to the server")
 	fs.StringVar(&cfg.environmentName, "environment-name", "go-sctp", "environment name reported to the server")
 	fs.BoolVar(&cfg.listScenarios, "list-scenarios", false, "print the client scenario map keyed by feature_id and exit")
+	fs.BoolVar(&cfg.includeManualSetup, "include-manual-setup", false, "run features whose server contract declares manual host setup requirements")
 	fs.StringVar(&features, "features", "", "optional comma-separated feature allowlist")
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err

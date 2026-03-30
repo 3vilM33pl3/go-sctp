@@ -30,7 +30,14 @@ Optional flags:
 - `--agent-name`
 - `--environment-name`
 - `--features bind_listen_connect,nodelay`
+- `--include-manual-setup`
 - `--list-scenarios`
+
+Features whose server contract declares `manual_setup_required=true` are skipped
+by default. To run them, either:
+
+- select them explicitly with `--features`
+- or opt into all of them with `--include-manual-setup`
 
 To print the Go-side feature mapping without contacting the server:
 
