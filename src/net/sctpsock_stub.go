@@ -61,7 +61,7 @@ func parseSCTPRcvInfo([]byte) (*SCTPRcvInfo, error) { return nil, errSCTPUnsuppo
 
 func setNoDelaySCTP(*netFD, bool) error { return errSCTPUnsupported }
 
-func setSCTPInitOptions(*netFD, SCTPInitOptions) error { return errSCTPUnsupported }
+func setSCTPInitOptions(*netFD, SCTPInitOptions) error    { return errSCTPUnsupported }
 func setSCTPInitOptionsSockFD(int, SCTPInitOptions) error { return errSCTPUnsupported }
 
 func setSCTPRecvRcvInfo(*netFD, bool) error { return errSCTPUnsupported }
@@ -72,7 +72,19 @@ func setSCTPAutoClose(*netFD, uint32) error { return errSCTPUnsupported }
 
 func setSCTPRTOInfo(*SCTPConn, SCTPRTOInfo) error { return errSCTPUnsupported }
 
+func setSCTPDefaultPRInfo(*SCTPConn, SCTPPRInfo) error { return errSCTPUnsupported }
+
 func setSCTPDefaultSendInfo(*SCTPConn, SCTPSndInfo) error { return errSCTPUnsupported }
+
+func setSCTPAuthChunks(*netFD, []uint8) error { return errSCTPUnsupported }
+
+func setSCTPAuthKey(*SCTPConn, SCTPAuthKey) error { return errSCTPUnsupported }
+
+func setSCTPActiveAuthKey(*SCTPConn, int32, uint16) error { return errSCTPUnsupported }
+
+func deleteSCTPAuthKey(*SCTPConn, int32, uint16) error { return errSCTPUnsupported }
+
+func setSCTPFragmentInterleave(*netFD, int) error { return errSCTPUnsupported }
 
 func subscribeSCTPEvents(*netFD, SCTPEventMask) error { return errSCTPUnsupported }
 
@@ -101,3 +113,7 @@ func enableSCTPStreamReset(*SCTPConn, uint16) error { return errSCTPUnsupported 
 func resetSCTPStreams(*SCTPConn, uint16, []uint16) error { return errSCTPUnsupported }
 
 func addSCTPStreams(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported }
+
+func setSCTPStreamScheduler(*SCTPConn, SCTPScheduler) error { return errSCTPUnsupported }
+
+func setSCTPStreamSchedulerValue(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported }

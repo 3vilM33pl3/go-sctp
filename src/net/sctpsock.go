@@ -141,6 +141,26 @@ type SCTPRTOInfo struct {
 	Min     uint32
 }
 
+// SCTPPRPolicy identifies the partial reliability policy used for SCTP_PR-SCTP.
+type SCTPPRPolicy uint16
+
+// SCTPPRInfo configures default partial-reliability behavior on a socket or association.
+type SCTPPRInfo struct {
+	AssocID int32
+	Value   uint32
+	Policy  SCTPPRPolicy
+}
+
+// SCTPAuthKey configures an SCTP AUTH shared key.
+type SCTPAuthKey struct {
+	AssocID int32
+	KeyID   uint16
+	Secret  []byte
+}
+
+// SCTPScheduler identifies an SCTP stream scheduler policy.
+type SCTPScheduler uint16
+
 // SCTPAssocStatus exposes the current status of an SCTP association.
 type SCTPAssocStatus struct {
 	AssocID            int32
@@ -162,6 +182,33 @@ type SCTPAssocStatus struct {
 const (
 	// SCTPUnordered requests unordered SCTP delivery for a sent message.
 	SCTPUnordered = 1 << 0
+
+	// SCTPPRNone disables partial reliability.
+	SCTPPRNone SCTPPRPolicy = 0x0000
+
+	// SCTPPRTTL enables time-based partial reliability.
+	SCTPPRTTL SCTPPRPolicy = 0x0010
+
+	// SCTPPRRTX enables retransmission-limited partial reliability.
+	SCTPPRRTX SCTPPRPolicy = 0x0020
+
+	// SCTPPRPriority enables priority-based partial reliability.
+	SCTPPRPriority SCTPPRPolicy = 0x0030
+
+	// SCTPSchedulerFCFS selects first-come, first-served stream scheduling.
+	SCTPSchedulerFCFS SCTPScheduler = 0
+
+	// SCTPSchedulerPriority selects priority-based stream scheduling.
+	SCTPSchedulerPriority SCTPScheduler = 1
+
+	// SCTPSchedulerRR selects round-robin stream scheduling.
+	SCTPSchedulerRR SCTPScheduler = 2
+
+	// SCTPSchedulerFC selects fair-capacity stream scheduling.
+	SCTPSchedulerFC SCTPScheduler = 3
+
+	// SCTPSchedulerWFQ selects weighted-fair-queueing stream scheduling.
+	SCTPSchedulerWFQ SCTPScheduler = 4
 
 	// SCTPStreamResetIncoming enables or requests incoming stream reset support.
 	SCTPStreamResetIncoming = 0x01
@@ -301,12 +348,67 @@ func (c *SCTPConn) SetRTOInfo(info SCTPRTOInfo) error {
 	return nil
 }
 
+// SetDefaultPRInfo controls SCTP_DEFAULT_PRINFO on the socket or association.
+func (c *SCTPConn) SetDefaultPRInfo(info SCTPPRInfo) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPDefaultPRInfo(c, info); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
 // SetDefaultSendInfo controls SCTP_DEFAULT_SNDINFO on the socket.
 func (c *SCTPConn) SetDefaultSendInfo(info SCTPSndInfo) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
 	if err := setSCTPDefaultSendInfo(c, info); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetAuthChunks controls SCTP_AUTH_CHUNK on the socket.
+func (c *SCTPConn) SetAuthChunks(chunks []uint8) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPAuthChunks(c.fd, chunks); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetAuthKey configures an SCTP AUTH shared key on the socket or association.
+func (c *SCTPConn) SetAuthKey(key SCTPAuthKey) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPAuthKey(c, key); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// ActivateAuthKey controls SCTP_AUTH_ACTIVE_KEY on the socket or association.
+func (c *SCTPConn) ActivateAuthKey(assocID int32, keyID uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPActiveAuthKey(c, assocID, keyID); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// DeleteAuthKey removes an SCTP AUTH shared key from the socket or association.
+func (c *SCTPConn) DeleteAuthKey(assocID int32, keyID uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := deleteSCTPAuthKey(c, assocID, keyID); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
 	return nil
@@ -340,6 +442,17 @@ func (c *SCTPConn) SetAutoClose(seconds uint32) error {
 		return syscall.EINVAL
 	}
 	if err := setSCTPAutoClose(c.fd, seconds); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetFragmentInterleave controls SCTP_FRAGMENT_INTERLEAVE on the socket.
+func (c *SCTPConn) SetFragmentInterleave(level int) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPFragmentInterleave(c.fd, level); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
 	return nil
@@ -459,6 +572,28 @@ func (c *SCTPConn) AddStreams(in, out uint16) error {
 		return syscall.EINVAL
 	}
 	if err := addSCTPStreams(c, in, out); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetStreamScheduler controls SCTP_STREAM_SCHEDULER on the current association.
+func (c *SCTPConn) SetStreamScheduler(policy SCTPScheduler) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPStreamScheduler(c, policy); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetStreamSchedulerValue controls SCTP_STREAM_SCHEDULER_VALUE for one stream.
+func (c *SCTPConn) SetStreamSchedulerValue(stream uint16, value uint16) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPStreamSchedulerValue(c, stream, value); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
 	return nil
