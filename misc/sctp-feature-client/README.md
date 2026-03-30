@@ -30,6 +30,16 @@ Optional flags:
 - `--agent-name`
 - `--environment-name`
 - `--features bind_listen_connect,nodelay`
+- `--list-scenarios`
+
+To print the Go-side feature mapping without contacting the server:
+
+```bash
+GOROOT=$(pwd) ./bin/go run ./misc/sctp-feature-client/go --list-scenarios
+```
+
+That output is keyed by `feature_id`, so it can be matched directly against the
+dashboard and server API while keeping the FreeBSD server client-agnostic.
 
 ## Current Support
 

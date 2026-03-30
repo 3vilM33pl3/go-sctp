@@ -30,6 +30,18 @@ type scenarioDefinition struct {
 	Handler           featureHandler
 }
 
+type scenarioSummary struct {
+	FeatureID         string `json:"feature_id"`
+	DashboardTitle    string `json:"dashboard_title"`
+	DashboardCategory string `json:"dashboard_category"`
+	ImplementationKey string `json:"implementation_key"`
+	SourceSymbol      string `json:"source_symbol"`
+	SourcePath        string `json:"source_path"`
+	Description       string `json:"description"`
+}
+
+const scenarioSourcePath = "misc/sctp-feature-client/go/scenarios.go"
+
 // scenarioCatalog mirrors the server/dashboard feature order on purpose.
 // FeatureID is the dashboard/API identifier; ImplementationKey groups shared
 // Go-side logic when multiple dashboard scenarios reuse the same handler.
@@ -87,14 +99,16 @@ func buildScenarioIndex() map[string]scenarioDefinition {
 	return out
 }
 
-func clientFeatureManifest() []clientFeatureMapping {
-	out := make([]clientFeatureMapping, 0, len(scenarioCatalog))
+func scenarioSummaries() []scenarioSummary {
+	out := make([]scenarioSummary, 0, len(scenarioCatalog))
 	for _, scenario := range scenarioCatalog {
-		out = append(out, clientFeatureMapping{
+		out = append(out, scenarioSummary{
 			FeatureID:         scenario.FeatureID,
+			DashboardTitle:    scenario.DashboardTitle,
+			DashboardCategory: scenario.DashboardCategory,
 			ImplementationKey: scenario.ImplementationKey,
 			SourceSymbol:      scenario.SourceSymbol,
-			SourcePath:        "misc/sctp-feature-client/go/scenarios.go",
+			SourcePath:        scenarioSourcePath,
 			Description:       scenario.Description,
 		})
 	}
