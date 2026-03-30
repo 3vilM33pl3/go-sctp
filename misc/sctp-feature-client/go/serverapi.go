@@ -99,6 +99,12 @@ type socketTuningContract struct {
 	MaxSeg             uint32 `json:"maxseg,omitempty"`
 }
 
+type oneToManyContract struct {
+	ExpectedAssociations    int  `json:"expected_associations"`
+	SameSocketRequired      bool `json:"same_socket_required"`
+	RequireDistinctAssocIDs bool `json:"require_distinct_assoc_ids"`
+}
+
 type scenarioContract struct {
 	FeatureID               string                   `json:"feature_id"`
 	CompletionMode          string                   `json:"completion_mode"`
@@ -120,6 +126,7 @@ type scenarioContract struct {
 	Interleaving            *interleavingContract    `json:"interleaving,omitempty"`
 	Scheduler               *schedulerContract       `json:"scheduler,omitempty"`
 	SocketTuning            *socketTuningContract    `json:"socket_tuning,omitempty"`
+	OneToMany               *oneToManyContract       `json:"one_to_many,omitempty"`
 }
 
 type featureState struct {
@@ -155,9 +162,10 @@ type errorResponse struct {
 }
 
 type completionPayload struct {
-	EvidenceKind string `json:"evidence_kind"`
-	EvidenceText string `json:"evidence_text"`
-	ReportText   string `json:"report_text"`
+	EvidenceKind string   `json:"evidence_kind"`
+	EvidenceText string   `json:"evidence_text"`
+	ReportText   string   `json:"report_text"`
+	AssocIDs     []string `json:"assoc_ids,omitempty"`
 }
 
 type unsupportedPayload struct {

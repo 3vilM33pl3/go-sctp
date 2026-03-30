@@ -102,6 +102,7 @@ var scenarioCatalog = []scenarioDefinition{
 	{"peeloff_assoc", "Association peeloff", "association", "peeloff_assoc", "handlePeelOffAssoc", "Attempt to peel the association onto a dedicated SCTP socket.", handlePeelOffAssoc},
 	{"assoc_id_listing", "Association identifier listing", "association", "assoc_id_listing", "handleAssocIDListing", "Enumerate association identifiers after sending the probe payload.", handleAssocIDListing},
 	{"assoc_status_opt_info", "SCTP_STATUS / opt_info", "introspection", "assoc_status", "handleAssocStatus", "Query association status and report the returned state summary.", handleAssocStatus},
+	{"one_to_many_multi_assoc", "One-to-many multi-association socket", "one-to-many", "one_to_many_multi_assoc", "handleOneToManyMultiAssoc", "Use one unconnected SCTP socket to create two associations to two server ports and report the assoc ids.", handleOneToManyMultiAssoc},
 
 	// Reconfiguration.
 	{"stream_reconfig_reset", "Stream reconfiguration reset", "reconfiguration", "stream_reset", "handleStreamReset", "Attempt SCTP stream reset on the active association after the server trigger.", handleStreamReset},
@@ -888,6 +889,80 @@ func handleAssocStatus(ctx context.Context, _ *runner, contract *scenarioContrac
 			}
 			return fmt.Sprintf("association status state=%d in_streams=%d out_streams=%d primary=%s", status.State, status.InStreams, status.OutStreams, status.PrimaryAddr.String())
 		}(),
+	}, nil
+}
+
+func handleOneToManyMultiAssoc(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	if contract.OneToMany == nil {
+		return nil, fmt.Errorf("feature %s did not include a one_to_many contract", contract.FeatureID)
+	}
+	if len(contract.ConnectAddresses) < contract.OneToMany.ExpectedAssociations {
+		return nil, fmt.Errorf("feature %s requires %d connect addresses, got %d", contract.FeatureID, contract.OneToMany.ExpectedAssociations, len(contract.ConnectAddresses))
+	}
+	if len(contract.ClientSendMessages) < contract.OneToMany.ExpectedAssociations {
+		return nil, fmt.Errorf("feature %s requires %d client messages, got %d", contract.FeatureID, contract.OneToMany.ExpectedAssociations, len(contract.ClientSendMessages))
+	}
+
+	targets, err := resolveContractSCTPAddrs(contract.Transport, contract.ConnectAddresses[:contract.OneToMany.ExpectedAssociations])
+	if err != nil {
+		return nil, err
+	}
+	localBase, _, err := selectBindxLocalAddrs(&targets[0])
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.OpenSCTP(contract.Transport, localBase)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := conn.SetInitOptions(net.SCTPInitOptions{NumOStreams: 32, MaxInStreams: 32}); err != nil {
+		return nil, err
+	}
+	for i := 0; i < contract.OneToMany.ExpectedAssociations; i++ {
+		msg := contract.ClientSendMessages[i]
+		if err := applyMessageSendControls(conn, msg, contract); err != nil {
+			return nil, err
+		}
+		info := &net.SCTPSndInfo{Stream: msg.Stream, PPID: msg.PPID}
+		if msg.Unordered {
+			info.Flags |= net.SCTPUnordered
+		}
+		payload := materializeMessagePayload(msg)
+		if _, err := conn.WriteToSCTP([]byte(payload), &targets[i], info); err != nil {
+			return nil, err
+		}
+	}
+
+	deadline := time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)
+	var ids []int32
+	for time.Now().Before(deadline) {
+		ids, err = conn.AssocIDs()
+		if err == nil {
+			ids = distinctNonZeroAssocIDs(ids)
+			if len(ids) >= contract.OneToMany.ExpectedAssociations {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) < contract.OneToMany.ExpectedAssociations {
+		return nil, fmt.Errorf("observed %d association ids on one-to-many socket; want %d", len(ids), contract.OneToMany.ExpectedAssociations)
+	}
+	slices.Sort(ids)
+	reportIDs := make([]string, 0, contract.OneToMany.ExpectedAssociations)
+	for _, id := range ids[:contract.OneToMany.ExpectedAssociations] {
+		reportIDs = append(reportIDs, strconv.FormatInt(int64(id), 10))
+	}
+	return &completionPayload{
+		EvidenceKind: "assoc_ids",
+		EvidenceText: fmt.Sprintf("observed distinct one-to-many assoc ids %s", strings.Join(reportIDs, ",")),
+		ReportText:   "client used one unconnected SCTP socket and observed distinct assoc ids for both targets",
+		AssocIDs:     reportIDs,
 	}, nil
 }
 
@@ -1711,6 +1786,25 @@ func selectBindxLocalAddrs(remote *net.SCTPAddr) (*net.SCTPAddr, []net.SCTPAddr,
 		}
 	}
 	return &net.SCTPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}, []net.SCTPAddr{{IP: net.IPv4(127, 0, 0, 2), Port: 0}}, nil
+}
+
+func distinctNonZeroAssocIDs(ids []int32) []int32 {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[int32]struct{}, len(ids))
+	out := make([]int32, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (n notificationSummary) renderedFlags() string {
