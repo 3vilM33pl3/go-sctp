@@ -46,6 +46,8 @@ func setSCTPRecvNxtInfo(*netFD, bool) error { return errSCTPUnsupported }
 
 func setSCTPAutoClose(*netFD, uint32) error { return errSCTPUnsupported }
 
+func setSCTPDelayedSack(*SCTPConn, SCTPDelayedSackInfo) error { return errSCTPUnsupported }
+
 func setSCTPRTOInfo(*SCTPConn, SCTPRTOInfo) error { return errSCTPUnsupported }
 
 func setSCTPDefaultPRInfo(*SCTPConn, SCTPPRInfo) error { return errSCTPUnsupported }
@@ -61,6 +63,10 @@ func setSCTPActiveAuthKey(*SCTPConn, int32, uint16) error { return errSCTPUnsupp
 func deleteSCTPAuthKey(*SCTPConn, int32, uint16) error { return errSCTPUnsupported }
 
 func setSCTPFragmentInterleave(*netFD, int) error { return errSCTPUnsupported }
+
+func setSCTPMaxBurst(*SCTPConn, uint32) error { return errSCTPUnsupported }
+
+func setSCTPMaxSeg(*netFD, uint32) error { return errSCTPUnsupported }
 
 func subscribeSCTPEvents(*netFD, SCTPEventMask) error { return errSCTPUnsupported }
 

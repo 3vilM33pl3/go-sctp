@@ -21,8 +21,11 @@ const (
 	sctpSockoptAutoClose      = 4
 	sctpSockoptSetPeerPrimary = 5
 	sctpSockoptPrimaryAddr    = 6
+	sctpSockoptMaxSeg         = 13
 	sctpSockoptStatus         = 14
+	sctpSockoptDelayedSack    = 16
 	sctpSockoptFragmentInter  = 18
+	sctpSockoptMaxBurst       = 20
 	sctpSockoptAuthChunk      = 21
 	sctpSockoptAuthKey        = 23
 	sctpSockoptAuthActiveKey  = 24
@@ -105,6 +108,12 @@ type sctpRTOInfoLinux struct {
 	Initial uint32
 	Max     uint32
 	Min     uint32
+}
+
+type sctpDelayedSackInfoLinux struct {
+	AssocID int32
+	Delay   uint32
+	Freq    uint32
 }
 
 type sctpPRInfoLinux struct {
@@ -205,6 +214,7 @@ const (
 	sizeofSCTPRcvInfoLinux     = int(unsafe.Sizeof(sctpRcvInfoLinux{}))
 	sizeofSCTPNxtInfoLinux     = int(unsafe.Sizeof(sctpNxtInfoLinux{}))
 	sizeofSCTPRTOInfoLinux     = int(unsafe.Sizeof(sctpRTOInfoLinux{}))
+	sizeofSCTPDelayedSackInfo  = int(unsafe.Sizeof(sctpDelayedSackInfoLinux{}))
 	sizeofSCTPPRInfoLinux      = int(unsafe.Sizeof(sctpPRInfoLinux{}))
 	sizeofSCTPAuthChunkLinux   = int(unsafe.Sizeof(sctpAuthChunkLinux{}))
 	sizeofSCTPAuthKeyIDLinux   = int(unsafe.Sizeof(sctpAuthKeyIDLinux{}))
@@ -373,6 +383,18 @@ func setSCTPFragmentInterleave(fd *netFD, level int) error {
 	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptFragmentInter, level)
 }
 
+func setSCTPMaxBurst(c *SCTPConn, value uint32) error {
+	req := sctpAssocValueLinux{
+		AssocID: optionalSCTPAssocID(c),
+		Value:   value,
+	}
+	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptMaxBurst, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPAssocValueLinux))
+}
+
+func setSCTPMaxSeg(fd *netFD, value uint32) error {
+	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptMaxSeg, int(value))
+}
+
 func setSCTPRTOInfo(c *SCTPConn, info SCTPRTOInfo) error {
 	if info.AssocID == 0 && c.assocID != 0 {
 		info.AssocID = c.assocID
@@ -384,6 +406,18 @@ func setSCTPRTOInfo(c *SCTPConn, info SCTPRTOInfo) error {
 		Min:     info.Min,
 	}
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptRTOInfo, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPRTOInfoLinux))
+}
+
+func setSCTPDelayedSack(c *SCTPConn, info SCTPDelayedSackInfo) error {
+	if info.AssocID == 0 && c.assocID != 0 {
+		info.AssocID = c.assocID
+	}
+	raw := sctpDelayedSackInfoLinux{
+		AssocID: info.AssocID,
+		Delay:   info.Delay,
+		Freq:    info.Frequency,
+	}
+	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptDelayedSack, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPDelayedSackInfo))
 }
 
 func setSCTPDefaultPRInfo(c *SCTPConn, info SCTPPRInfo) error {

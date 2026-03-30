@@ -496,6 +496,15 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 	if err := cli.SetRTOInfo(SCTPRTOInfo{AssocID: ids[0], Initial: 1200, Max: 3000, Min: 600}); err != nil {
 		t.Fatalf("SetRTOInfo error: %v", err)
 	}
+	if err := cli.SetDelayedSack(SCTPDelayedSackInfo{Delay: 200, Frequency: 2}); err != nil {
+		t.Fatalf("SetDelayedSack error: %v", err)
+	}
+	if err := cli.SetMaxBurst(2); err != nil {
+		t.Fatalf("SetMaxBurst error: %v", err)
+	}
+	if err := cli.SetMaxSeg(1200); err != nil {
+		t.Fatalf("SetMaxSeg error: %v", err)
+	}
 	if err := cli.SetAutoClose(5); err != nil {
 		t.Fatalf("SetAutoClose error: %v", err)
 	}

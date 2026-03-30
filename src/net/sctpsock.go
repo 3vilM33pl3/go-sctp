@@ -141,6 +141,13 @@ type SCTPRTOInfo struct {
 	Min     uint32
 }
 
+// SCTPDelayedSackInfo configures delayed-SACK behavior on a socket or association.
+type SCTPDelayedSackInfo struct {
+	AssocID   int32
+	Delay     uint32
+	Frequency uint32
+}
+
 // SCTPPRPolicy identifies the partial reliability policy used for SCTP_PR-SCTP.
 type SCTPPRPolicy uint16
 
@@ -348,6 +355,17 @@ func (c *SCTPConn) SetRTOInfo(info SCTPRTOInfo) error {
 	return nil
 }
 
+// SetDelayedSack controls SCTP_DELAYED_SACK on the socket or association.
+func (c *SCTPConn) SetDelayedSack(info SCTPDelayedSackInfo) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPDelayedSack(c, info); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
 // SetDefaultPRInfo controls SCTP_DEFAULT_PRINFO on the socket or association.
 func (c *SCTPConn) SetDefaultPRInfo(info SCTPPRInfo) error {
 	if !c.ok() {
@@ -453,6 +471,28 @@ func (c *SCTPConn) SetFragmentInterleave(level int) error {
 		return syscall.EINVAL
 	}
 	if err := setSCTPFragmentInterleave(c.fd, level); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetMaxBurst controls SCTP_MAX_BURST on the socket or association.
+func (c *SCTPConn) SetMaxBurst(value uint32) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPMaxBurst(c, value); err != nil {
+		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return nil
+}
+
+// SetMaxSeg controls SCTP_MAXSEG on the socket.
+func (c *SCTPConn) SetMaxSeg(value uint32) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	if err := setSCTPMaxSeg(c.fd, value); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
 	return nil

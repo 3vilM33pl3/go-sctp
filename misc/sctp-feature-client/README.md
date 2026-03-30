@@ -76,8 +76,12 @@ Implemented now:
 - `SCTP_NODELAY`
 - `SCTP_INITMSG`
 - `SCTP_RTOINFO`
+- `SCTP_DELAYED_SACK`
+- `SCTP_MAX_BURST`
 - `SCTP_DEFAULT_SNDINFO`
 - `SCTP_RECVRCVINFO`
+- large-message reassembly
+- `SCTP_MAXSEG` fragmentation control
 - `SCTP_RECVNXTINFO`
 - `SCTP_AUTOCLOSE`
 - notification scenarios
