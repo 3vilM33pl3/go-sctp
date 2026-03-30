@@ -552,12 +552,8 @@ func setSCTPStreamScheduler(c *SCTPConn, policy SCTPScheduler) error {
 }
 
 func setSCTPStreamSchedulerValue(c *SCTPConn, stream uint16, value uint16) error {
-	assocID, err := resolveSCTPAssocID(c, 0)
-	if err != nil {
-		return err
-	}
 	req := sctpStreamValueLinux{
-		AssocID: assocID,
+		AssocID: optionalSCTPAssocID(c),
 		Stream:  stream,
 		Value:   value,
 	}
