@@ -85,6 +85,7 @@ Implemented now:
 - `SCTP_RECVNXTINFO`
 - `SCTP_AUTOCLOSE`
 - notification scenarios
+- typed notification parsing in the feature client for address-change and partial-delivery events
 - multihome connect
 - bindx add/remove on a pre-connected client socket
 - local and peer address enumeration
@@ -97,6 +98,13 @@ Implemented now:
 - stream add-stream reconfiguration
 - invalid-target error path
 - unordered delivery attempt via `SCTPSndInfo.Flags`
+
+Manual-setup scenarios currently exposed by the server and skipped by default include:
+
+- PR-SCTP loss-based checks
+- AUTH and ASCONF scenarios that depend on host sysctls
+- peer-address-change notifications that need a real path-state transition
+- partial-delivery notifications that need host/socket tuning so large inbound messages trigger partial delivery
 
 ## Validation Notes
 

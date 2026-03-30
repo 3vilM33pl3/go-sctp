@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -14,7 +15,19 @@ import (
 )
 
 const (
-	msgNotification = 0x8000
+	msgNotification               = 0x8000
+	sctpNotificationAssocChange   = 0x8001
+	sctpNotificationPeerAddr      = 0x8002
+	sctpNotificationSendFailed    = 0x8003
+	sctpNotificationShutdown      = 0x8005
+	sctpNotificationPartialDeliv  = 0x8006
+	sctpNotificationAdaptation    = 0x8007
+	sctpNotificationAuth          = 0x8008
+	sctpNotificationSenderDry     = 0x8009
+	sctpNotificationStreamReset   = 0x800a
+	sctpNotificationAssocReset    = 0x800b
+	sctpNotificationStreamChange  = 0x800c
+	sctpNotificationSendFailedEvt = 0x800d
 )
 
 type runner struct {
@@ -74,6 +87,8 @@ var scenarioCatalog = []scenarioDefinition{
 	{"notifications", "Association and shutdown notifications", "events", "notification_observer", "handleNotificationScenario", "Subscribe to SCTP notifications and report the association and shutdown events observed.", handleNotificationScenario},
 	{"event_subscription_matrix", "Event subscription matrix", "events", "notification_observer", "handleNotificationScenario", "Subscribe to the available SCTP events and report which notifications were delivered.", handleNotificationScenario},
 	{"association_shutdown_notifications", "Association shutdown notifications", "events", "notification_observer", "handleNotificationScenario", "Observe graceful association teardown notifications after the server trigger.", handleNotificationScenario},
+	{"peer_addr_change_notifications", "Peer address change notifications", "path-management", "peer_addr_notifications", "handlePeerAddrChangeNotifications", "Subscribe to peer-address notifications during multihome association setup and early traffic.", handlePeerAddrChangeNotifications},
+	{"partial_delivery_event", "Partial delivery event", "notifications", "partial_delivery", "handlePartialDeliveryEvent", "Receive a large server message and observe partial-delivery notifications while it is being surfaced.", handlePartialDeliveryEvent},
 
 	// Multihoming and address control.
 	{"multi_bind", "Multihome reference server", "multihoming", "multi_bind", "handleMultiBind", "Connect to the reference server using all advertised peer addresses.", handleMultiBind},
@@ -505,7 +520,118 @@ func handleNotificationScenario(ctx context.Context, _ *runner, contract *scenar
 	return &completionPayload{
 		EvidenceKind: "runtime",
 		EvidenceText: fmt.Sprintf("observed %d SCTP notification frame(s)", notifications.count),
-		ReportText:   fmt.Sprintf("observed notification flags %s", notifications.renderedFlags()),
+		ReportText:   fmt.Sprintf("observed notification types %s", notifications.renderedTypes()),
+	}, nil
+}
+
+func handlePeerAddrChangeNotifications(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContractPreferMulti(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	mask := buildEventMask(contract.ClientSubs)
+	mask.Address = true
+	mask.Association = true
+	if err := conn.SubscribeEvents(mask); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)); err != nil {
+		return nil, err
+	}
+	notifications, err := runTriggerAndRead(conn, contract)
+	if err != nil {
+		return nil, err
+	}
+	if !notifications.hasType(sctpNotificationPeerAddr) {
+		return nil, fmt.Errorf("no SCTP_PEER_ADDR_CHANGE notification observed")
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("observed peer-address-change notifications %s", notifications.renderedTypes()),
+		ReportText:   fmt.Sprintf("client observed SCTP_PEER_ADDR_CHANGE notifications %s", notifications.renderedTypes()),
+	}, nil
+}
+
+func handlePartialDeliveryEvent(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	mask := buildEventMask(contract.ClientSubs)
+	mask.PartialDelivery = true
+	mask.DataIO = true
+	if err := conn.SubscribeEvents(mask); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)); err != nil {
+		return nil, err
+	}
+	if contract.TriggerPayload != "" {
+		if _, err := conn.WriteToSCTP([]byte(contract.TriggerPayload), nil, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(contract.ServerSendMessages) != 1 {
+		return nil, fmt.Errorf("feature %s requires exactly one server message", contract.FeatureID)
+	}
+	expected := materializeMessagePayload(contract.ServerSendMessages[0])
+	buf := make([]byte, 4096)
+	var payload strings.Builder
+	payload.Grow(len(expected))
+	notifications := notificationSummary{flags: make(map[int]int), types: make(map[uint16]int)}
+	var firstInfoChecked bool
+	for payload.Len() < len(expected) {
+		n, _, flags, _, info, err := conn.ReadFromSCTP(buf)
+		if err != nil {
+			return nil, err
+		}
+		if flags&msgNotification != 0 {
+			notifications.record(flags, buf[:n])
+			continue
+		}
+		if !firstInfoChecked && info != nil {
+			firstInfoChecked = true
+			want := contract.ServerSendMessages[0]
+			if info.Stream != want.Stream {
+				return nil, fmt.Errorf("unexpected server stream %d, want %d", info.Stream, want.Stream)
+			}
+			if info.PPID != want.PPID {
+				return nil, fmt.Errorf("unexpected server ppid %d, want %d", info.PPID, want.PPID)
+			}
+		}
+		payload.Write(buf[:n])
+	}
+	if got := payload.String(); got != expected {
+		return nil, fmt.Errorf("unexpected partial-delivery payload length=%d want=%d", len(got), len(expected))
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(750 * time.Millisecond)); err == nil {
+		for {
+			n, _, flags, _, _, err := conn.ReadFromSCTP(buf)
+			if err != nil {
+				break
+			}
+			if flags&msgNotification != 0 {
+				notifications.record(flags, buf[:n])
+			}
+		}
+	}
+	if !notifications.hasType(sctpNotificationPartialDeliv) {
+		return nil, fmt.Errorf("no SCTP_PARTIAL_DELIVERY_EVENT observed while receiving the large message")
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("received %d-byte payload and observed notifications %s", len(expected), notifications.renderedTypes()),
+		ReportText:   fmt.Sprintf("client observed SCTP_PARTIAL_DELIVERY_EVENT while receiving %d bytes", len(expected)),
 	}, nil
 }
 
@@ -1123,6 +1249,25 @@ func dialContract(contract *scenarioContract) (*net.SCTPConn, error) {
 	})
 }
 
+func dialContractPreferMulti(contract *scenarioContract) (*net.SCTPConn, error) {
+	if len(contract.ConnectAddresses) <= 1 {
+		return dialContract(contract)
+	}
+	raddr, err := net.ResolveSCTPMultiAddr(contract.Transport, contract.ConnectAddresses)
+	if err != nil {
+		return dialContract(contract)
+	}
+	conn, err := net.DialSCTPMulti(contract.Transport, nil, raddr)
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetInitOptions(net.SCTPInitOptions{NumOStreams: 32, MaxInStreams: 32}); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
 func dialContractWithAuth(ctx context.Context, contract *scenarioContract) (*net.SCTPConn, error) {
 	if contract.Auth == nil {
 		return nil, fmt.Errorf("missing auth contract")
@@ -1394,10 +1539,11 @@ func sendContractMessagesToPeer(conn *net.SCTPConn, peer *net.SCTPAddr, messages
 type notificationSummary struct {
 	count int
 	flags map[int]int
+	types map[uint16]int
 }
 
 func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificationSummary, error) {
-	summary := notificationSummary{flags: make(map[int]int)}
+	summary := notificationSummary{flags: make(map[int]int), types: make(map[uint16]int)}
 	buf := make([]byte, maxExpectedPayloadSize(expected))
 	receivedMessages := 0
 	for receivedMessages < len(expected) {
@@ -1406,8 +1552,7 @@ func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificatio
 			return summary, err
 		}
 		if flags&msgNotification != 0 {
-			summary.count++
-			summary.flags[flags]++
+			summary.record(flags, buf[:n])
 			continue
 		}
 		want := expected[receivedMessages]
@@ -1428,13 +1573,12 @@ func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificatio
 
 	if err := conn.SetReadDeadline(time.Now().Add(750 * time.Millisecond)); err == nil {
 		for {
-			_, _, flags, _, _, err := conn.ReadFromSCTP(buf)
+			n, _, flags, _, _, err := conn.ReadFromSCTP(buf)
 			if err != nil {
 				break
 			}
 			if flags&msgNotification != 0 {
-				summary.count++
-				summary.flags[flags]++
+				summary.record(flags, buf[:n])
 			}
 		}
 	}
@@ -1462,6 +1606,77 @@ func runTriggerAndRead(conn *net.SCTPConn, contract *scenarioContract) (notifica
 		}
 	}
 	return readServerMessages(conn, contract.ServerSendMessages)
+}
+
+func (n *notificationSummary) record(flags int, payload []byte) {
+	if n.flags == nil {
+		n.flags = make(map[int]int)
+	}
+	if n.types == nil {
+		n.types = make(map[uint16]int)
+	}
+	n.count++
+	n.flags[flags]++
+	if typ := parseNotificationType(payload); typ != 0 {
+		n.types[typ]++
+	}
+}
+
+func parseNotificationType(payload []byte) uint16 {
+	if len(payload) < 2 {
+		return 0
+	}
+	return binary.LittleEndian.Uint16(payload[:2])
+}
+
+func (n notificationSummary) hasType(typ uint16) bool {
+	return n.types[typ] > 0
+}
+
+func notificationTypeName(typ uint16) string {
+	switch typ {
+	case sctpNotificationAssocChange:
+		return "SCTP_ASSOC_CHANGE"
+	case sctpNotificationPeerAddr:
+		return "SCTP_PEER_ADDR_CHANGE"
+	case sctpNotificationSendFailed, sctpNotificationSendFailedEvt:
+		return "SCTP_SEND_FAILED_EVENT"
+	case sctpNotificationShutdown:
+		return "SCTP_SHUTDOWN_EVENT"
+	case sctpNotificationPartialDeliv:
+		return "SCTP_PARTIAL_DELIVERY_EVENT"
+	case sctpNotificationAdaptation:
+		return "SCTP_ADAPTATION_INDICATION"
+	case sctpNotificationAuth:
+		return "SCTP_AUTHENTICATION_EVENT"
+	case sctpNotificationSenderDry:
+		return "SCTP_SENDER_DRY_EVENT"
+	case sctpNotificationStreamReset:
+		return "SCTP_STREAM_RESET_EVENT"
+	case sctpNotificationAssocReset:
+		return "SCTP_ASSOC_RESET_EVENT"
+	case sctpNotificationStreamChange:
+		return "SCTP_STREAM_CHANGE_EVENT"
+	default:
+		return fmt.Sprintf("notification_%d", typ)
+	}
+}
+
+func (n notificationSummary) renderedTypes() string {
+	if len(n.types) == 0 {
+		return "[]"
+	}
+	keys := make([]int, 0, len(n.types))
+	for typ := range n.types {
+		keys = append(keys, int(typ))
+	}
+	slices.Sort(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		typ := uint16(key)
+		parts = append(parts, fmt.Sprintf("%s(x%d)", notificationTypeName(typ), n.types[typ]))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 func openBoundFeatureSocket(contract *scenarioContract) (*net.SCTPConn, *net.SCTPAddr, []net.SCTPAddr, error) {
@@ -1528,6 +1743,16 @@ func buildEventMask(subscriptions []string) net.SCTPEventMask {
 			mask.Address = true
 		case "peer_error":
 			mask.PeerError = true
+		case "send_failure":
+			mask.SendFailure = true
+		case "partial_delivery":
+			mask.PartialDelivery = true
+		case "adaptation":
+			mask.Adaptation = true
+		case "authentication":
+			mask.Authentication = true
+		case "sender_dry":
+			mask.SenderDry = true
 		case "stream_reset":
 			mask.StreamReset = true
 		}
