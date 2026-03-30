@@ -48,6 +48,14 @@ type sessionResponse struct {
 	DashboardPath string `json:"dashboard_path"`
 }
 
+type clientFeatureMapping struct {
+	FeatureID         string `json:"feature_id,omitempty"`
+	ImplementationKey string `json:"implementation_key"`
+	SourceSymbol      string `json:"source_symbol"`
+	SourcePath        string `json:"source_path"`
+	Description       string `json:"description"`
+}
+
 type messageSpec struct {
 	Payload string `json:"payload"`
 	Stream  uint16 `json:"stream"`
@@ -71,10 +79,11 @@ type scenarioContract struct {
 }
 
 type featureState struct {
-	ID       string            `json:"id"`
-	State    string            `json:"state"`
-	Message  string            `json:"message"`
-	Contract *scenarioContract `json:"contract,omitempty"`
+	ID            string                `json:"id"`
+	State         string                `json:"state"`
+	Message       string                `json:"message"`
+	ClientMapping *clientFeatureMapping `json:"client_mapping,omitempty"`
+	Contract      *scenarioContract     `json:"contract,omitempty"`
 }
 
 type summaryCounts struct {
@@ -142,10 +151,15 @@ func (c *featureServerClient) features(ctx context.Context) (*catalogResponse, e
 	return &out, nil
 }
 
-func (c *featureServerClient) createSession(ctx context.Context, agentName, environmentName string) (*sessionResponse, error) {
-	body := map[string]string{
-		"agent_name":       agentName,
-		"environment_name": environmentName,
+func (c *featureServerClient) createSession(ctx context.Context, agentName, environmentName string, manifest []clientFeatureMapping) (*sessionResponse, error) {
+	body := struct {
+		AgentName             string                 `json:"agent_name"`
+		EnvironmentName       string                 `json:"environment_name"`
+		ClientFeatureManifest []clientFeatureMapping `json:"client_feature_manifest,omitempty"`
+	}{
+		AgentName:             agentName,
+		EnvironmentName:       environmentName,
+		ClientFeatureManifest: manifest,
 	}
 	var out sessionResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/sessions", body, &out); err != nil {
