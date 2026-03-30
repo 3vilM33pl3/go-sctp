@@ -141,3 +141,31 @@ func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPCo
 	}
 	return newSCTPConn(fd), nil
 }
+
+func (sl *sysListener) openSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
+	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
+	if sl.ListenConfig.Control != nil {
+		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			return sl.ListenConfig.Control(network, address, c)
+		}
+	}
+	family, ipv6only := favoriteAddrFamily(sl.network, laddr, nil, "listen")
+	s, err := sysSocket(family, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP)
+	if err != nil {
+		return nil, err
+	}
+	if err := setDefaultSockopts(s, family, syscall.SOCK_SEQPACKET, ipv6only); err != nil {
+		syscall.Close(s)
+		return nil, err
+	}
+	fd, err := newFD(s, family, syscall.SOCK_SEQPACKET, sl.network)
+	if err != nil {
+		syscall.Close(s)
+		return nil, err
+	}
+	if err := fd.listenDatagram(ctx, laddr, ctrlCtxFn); err != nil {
+		fd.Close()
+		return nil, err
+	}
+	return newSCTPConn(fd), nil
+}
