@@ -84,6 +84,14 @@ var scenarioCatalog = []scenarioDefinition{
 	// Reconfiguration.
 	{"stream_reconfig_reset", "Stream reconfiguration reset", "reconfiguration", "stream_reset", "handleStreamReset", "Attempt SCTP stream reset on the active association after the server trigger.", handleStreamReset},
 	{"stream_reconfig_add_streams", "Stream reconfiguration add streams", "reconfiguration", "stream_add_streams", "handleStreamAddStreams", "Attempt SCTP stream addition on the active association after the server trigger.", handleStreamAddStreams},
+	{"pr_sctp_ttl", "PR-SCTP TTL policy", "reliability", "pr_sctp", "handlePRTTL", "Apply a TTL-based partially reliable send and verify forward progress under manual impairment.", handlePRTTL},
+	{"pr_sctp_rtx", "PR-SCTP retransmission policy", "reliability", "pr_sctp", "handlePRRTX", "Apply a retransmission-limited partially reliable send and verify forward progress under manual impairment.", handlePRRTX},
+	{"auth_required_chunks", "SCTP AUTH required chunks", "authentication", "auth_required_chunks", "handleAuthRequiredChunks", "Configure SCTP AUTH chunk coverage and shared keys before sending the probe payload.", handleAuthRequiredChunks},
+	{"auth_key_rotation", "SCTP AUTH key rotation", "authentication", "auth_key_rotation", "handleAuthKeyRotation", "Install SCTP AUTH keys, rotate the active key, and send the probe payload.", handleAuthKeyRotation},
+	{"asconf_add_remove", "ASCONF address add/remove", "multihoming", "asconf_add_remove", "handleASCONFAddRemove", "Attempt SCTP dynamic address reconfiguration on the connected association.", handleASCONFAddRemove},
+	{"idata_interleaving", "I-DATA / fragment interleaving", "messaging", "idata_interleaving", "handleIDataInterleaving", "Enable fragment interleaving and receive the server's large-plus-small message burst.", handleIDataInterleaving},
+	{"stream_scheduler_policy", "Stream scheduler policy", "scheduler", "stream_scheduler_policy", "handleStreamSchedulerPolicy", "Apply a non-default SCTP stream scheduler policy on the active association.", handleStreamSchedulerPolicy},
+	{"stream_scheduler_value", "Stream scheduler value", "scheduler", "stream_scheduler_value", "handleStreamSchedulerValue", "Apply per-stream SCTP scheduler values on the active association.", handleStreamSchedulerValue},
 
 	// Negative/error path.
 	{"negative_connect_error", "Negative connect path", "error_path", "negative_connect_error", "handleNegativeConnectError", "Attempt an invalid SCTP connection target and report the surfaced error.", handleNegativeConnectError},
@@ -202,7 +210,7 @@ func handleBasicSend(ctx context.Context, _ *runner, contract *scenarioContract)
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	if contract.CompletionMode == completionHybrid {
@@ -225,7 +233,7 @@ func handleNoDelay(ctx context.Context, _ *runner, contract *scenarioContract) (
 	if err := conn.SetNoDelay(true); err != nil {
 		return nil, err
 	}
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	return &completionPayload{
@@ -249,7 +257,7 @@ func handleInitMsg(ctx context.Context, _ *runner, contract *scenarioContract) (
 	if err := conn.SetInitOptions(opts); err != nil {
 		return nil, err
 	}
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	return &completionPayload{
@@ -270,7 +278,7 @@ func handleRTOInfo(ctx context.Context, _ *runner, contract *scenarioContract) (
 	if err := conn.SetRTOInfo(info); err != nil {
 		return nil, err
 	}
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	return &completionPayload{
@@ -428,7 +436,7 @@ func handleMultiBind(ctx context.Context, _ *runner, contract *scenarioContract)
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	return &completionPayload{
@@ -445,7 +453,7 @@ func handleLocalAddrEnum(ctx context.Context, _ *runner, contract *scenarioContr
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	addrs, err := conn.LocalAddrs()
@@ -466,7 +474,7 @@ func handlePeerAddrEnum(ctx context.Context, _ *runner, contract *scenarioContra
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	addrs, err := conn.PeerAddrs()
@@ -506,7 +514,7 @@ func handleBindxAddRemove(ctx context.Context, _ *runner, contract *scenarioCont
 		return nil, err
 	}
 	defer conn.Close()
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	return &completionPayload{
@@ -534,7 +542,7 @@ func handlePrimaryAddrManagement(ctx context.Context, _ *runner, contract *scena
 	} else {
 		opErr = enumErr
 	}
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	evidence := "local primary-address management succeeded"
@@ -571,7 +579,7 @@ func handlePeerPrimaryAddrRequest(ctx context.Context, _ *runner, contract *scen
 	} else {
 		opErr = enumErr
 	}
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	evidence := "peer primary-address request succeeded"
@@ -605,7 +613,7 @@ func handlePeelOffAssoc(ctx context.Context, _ *runner, contract *scenarioContra
 	} else {
 		sendConn = conn
 	}
-	if err := sendContractMessages(sendConn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(sendConn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	evidence := "PeelOff(0) succeeded and the peeled association sent the probe payload"
@@ -628,7 +636,7 @@ func handleAssocIDListing(ctx context.Context, _ *runner, contract *scenarioCont
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	ids, listErr := conn.AssocIDs()
@@ -656,7 +664,7 @@ func handleAssocStatus(ctx context.Context, _ *runner, contract *scenarioContrac
 	}
 	defer conn.Close()
 
-	if err := sendContractMessages(conn, contract.ClientSendMessages); err != nil {
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
 	status, statusErr := conn.AssocStatus(0)
@@ -734,6 +742,203 @@ func handleStreamAddStreams(ctx context.Context, _ *runner, contract *scenarioCo
 		EvidenceKind: "runtime",
 		EvidenceText: evidence,
 		ReportText:   report,
+	}, nil
+}
+
+func handlePRTTL(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	return handlePRScenario(ctx, contract, "ttl")
+}
+
+func handlePRRTX(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	return handlePRScenario(ctx, contract, "rtx")
+}
+
+func handlePRScenario(ctx context.Context, contract *scenarioContract, mode string) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	evidence := fmt.Sprintf("applied PR-SCTP %s policy and sent the configured payload sequence", mode)
+	if contract.ManualSetupRequired {
+		evidence += "; manual impairment was required: " + strings.Join(contract.ManualSetupInstructions, " | ")
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: evidence,
+		ReportText:   fmt.Sprintf("client applied PR-SCTP %s with the documented impairment and sent the follow-up reliable payload", mode),
+	}, nil
+}
+
+func handleAuthRequiredChunks(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := applyAuthContract(conn, contract.Auth); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("configured AUTH chunk coverage %v and sent the probe payload", contract.Auth.ChunkTypes),
+		ReportText:   fmt.Sprintf("client configured SCTP AUTH chunk coverage %v with key ids %d/%d", contract.Auth.ChunkTypes, contract.Auth.PrimaryKeyID, contract.Auth.SecondaryKeyID),
+	}, nil
+}
+
+func handleAuthKeyRotation(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if err := applyAuthContract(conn, contract.Auth); err != nil {
+		return nil, err
+	}
+	if err := conn.ActivateAuthKey(0, contract.Auth.SecondaryKeyID); err != nil {
+		return nil, err
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("installed AUTH keys %d/%d and activated key %d before sending", contract.Auth.PrimaryKeyID, contract.Auth.SecondaryKeyID, contract.Auth.SecondaryKeyID),
+		ReportText:   fmt.Sprintf("client rotated the active SCTP AUTH key from %d to %d", contract.Auth.PrimaryKeyID, contract.Auth.SecondaryKeyID),
+	}, nil
+}
+
+func handleASCONFAddRemove(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if contract.AddressReconfig == nil {
+		return nil, fmt.Errorf("missing address-reconfiguration contract")
+	}
+
+	addAddrs, err := resolveContractSCTPAddrs(contract.Transport, contract.AddressReconfig.AddAddresses)
+	if err != nil {
+		return nil, err
+	}
+	removeAddrs, err := resolveContractSCTPAddrs(contract.Transport, contract.AddressReconfig.RemoveAddresses)
+	if err != nil {
+		return nil, err
+	}
+	if len(addAddrs) > 0 {
+		if err := conn.BindAddrs(addAddrs); err != nil {
+			return nil, err
+		}
+	}
+	if len(removeAddrs) > 0 {
+		if err := conn.UnbindAddrs(removeAddrs); err != nil {
+			return nil, err
+		}
+	}
+	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("attempted dynamic address reconfiguration add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses),
+		ReportText:   fmt.Sprintf("client attempted SCTP ASCONF add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses),
+	}, nil
+}
+
+func handleIDataInterleaving(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	level := 2
+	if contract.Interleaving != nil && contract.Interleaving.FragmentInterleaveLevel > 0 {
+		level = contract.Interleaving.FragmentInterleaveLevel
+	}
+	if err := conn.SetFragmentInterleave(level); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if _, err := runTriggerAndRead(conn, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetFragmentInterleave(%d) succeeded and the server burst was received", level),
+		ReportText:   fmt.Sprintf("client enabled fragment interleaving level %d and received the server's large-plus-small message burst", level),
+	}, nil
+}
+
+func handleStreamSchedulerPolicy(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	policy, err := parseSchedulerPolicy(contract.Scheduler)
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetStreamScheduler(policy); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if _, err := runTriggerAndRead(conn, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetStreamScheduler(%s) succeeded", contract.Scheduler.Policy),
+		ReportText:   fmt.Sprintf("client applied SCTP stream scheduler policy %s", contract.Scheduler.Policy),
+	}, nil
+}
+
+func handleStreamSchedulerValue(ctx context.Context, _ *runner, contract *scenarioContract) (*completionPayload, error) {
+	conn, err := dialContract(contract)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	policy, err := parseSchedulerPolicy(contract.Scheduler)
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetStreamScheduler(policy); err != nil {
+		return nil, err
+	}
+	if err := conn.SetStreamSchedulerValue(contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue); err != nil {
+		return nil, err
+	}
+	if err := conn.SetStreamSchedulerValue(contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue); err != nil {
+		return nil, err
+	}
+	if err := conn.SetRecvRcvInfo(true); err != nil {
+		return nil, err
+	}
+	if _, err := runTriggerAndRead(conn, contract); err != nil {
+		return nil, err
+	}
+	return &completionPayload{
+		EvidenceKind: "runtime",
+		EvidenceText: fmt.Sprintf("SetStreamSchedulerValue succeeded for streams %d/%d with values %d/%d", contract.Scheduler.PrimaryStream, contract.Scheduler.SecondaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryValue),
+		ReportText:   fmt.Sprintf("client applied scheduler values stream %d=%d and stream %d=%d", contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue),
 	}, nil
 }
 
@@ -838,29 +1043,161 @@ func dialContract(contract *scenarioContract) (*net.SCTPConn, error) {
 	})
 }
 
-func sendContractMessages(conn *net.SCTPConn, messages []messageSpec) error {
-	for _, msg := range messages {
-		info := &net.SCTPSndInfo{
-			Stream: msg.Stream,
-			PPID:   msg.PPID,
+func materializeMessagePayload(msg messageSpec) string {
+	if msg.SizeBytes <= 0 || msg.SizeBytes <= len(msg.Payload) {
+		return msg.Payload
+	}
+	if msg.Payload == "" {
+		return strings.Repeat("x", msg.SizeBytes)
+	}
+	var builder strings.Builder
+	builder.Grow(msg.SizeBytes)
+	for builder.Len() < msg.SizeBytes {
+		remaining := msg.SizeBytes - builder.Len()
+		if remaining >= len(msg.Payload) {
+			builder.WriteString(msg.Payload)
+			continue
 		}
-		if _, err := conn.WriteToSCTP([]byte(msg.Payload), nil, info); err != nil {
+		builder.WriteString(msg.Payload[:remaining])
+	}
+	return builder.String()
+}
+
+func parsePRPolicy(raw string) (net.SCTPPRPolicy, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "none":
+		return net.SCTPPRNone, nil
+	case "ttl":
+		return net.SCTPPRTTL, nil
+	case "rtx":
+		return net.SCTPPRRTX, nil
+	case "priority":
+		return net.SCTPPRPriority, nil
+	default:
+		return 0, fmt.Errorf("unknown PR-SCTP policy %q", raw)
+	}
+}
+
+func parseSchedulerPolicy(config *schedulerContract) (net.SCTPScheduler, error) {
+	if config == nil {
+		return 0, fmt.Errorf("missing scheduler contract")
+	}
+	switch strings.ToLower(strings.TrimSpace(config.Policy)) {
+	case "fcfs":
+		return net.SCTPSchedulerFCFS, nil
+	case "priority":
+		return net.SCTPSchedulerPriority, nil
+	case "rr":
+		return net.SCTPSchedulerRR, nil
+	case "fc":
+		return net.SCTPSchedulerFC, nil
+	case "wfq":
+		return net.SCTPSchedulerWFQ, nil
+	default:
+		return 0, fmt.Errorf("unknown scheduler policy %q", config.Policy)
+	}
+}
+
+func applyAuthContract(conn *net.SCTPConn, auth *authContract) error {
+	if auth == nil {
+		return fmt.Errorf("missing auth contract")
+	}
+	if err := conn.SetAuthChunks(auth.ChunkTypes); err != nil {
+		return err
+	}
+	if err := conn.SetAuthKey(net.SCTPAuthKey{KeyID: auth.PrimaryKeyID, Secret: []byte(auth.PrimarySecret)}); err != nil {
+		return err
+	}
+	if auth.SecondaryKeyID != 0 || auth.SecondarySecret != "" {
+		if err := conn.SetAuthKey(net.SCTPAuthKey{KeyID: auth.SecondaryKeyID, Secret: []byte(auth.SecondarySecret)}); err != nil {
+			return err
+		}
+	}
+	if auth.PrimaryKeyID != 0 {
+		if err := conn.ActivateAuthKey(0, auth.PrimaryKeyID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func sendContractMessagesToPeer(conn *net.SCTPConn, peer *net.SCTPAddr, messages []messageSpec) error {
-	if peer == nil {
-		return fmt.Errorf("no peer address available")
+func applyMessageSendControls(conn *net.SCTPConn, msg messageSpec, contract *scenarioContract) error {
+	if msg.PRPolicy != "" {
+		policy, err := parsePRPolicy(msg.PRPolicy)
+		if err != nil {
+			return err
+		}
+		if err := conn.SetDefaultPRInfo(net.SCTPPRInfo{Policy: policy, Value: msg.PRValue}); err != nil {
+			return err
+		}
+	} else {
+		if err := conn.SetDefaultPRInfo(net.SCTPPRInfo{Policy: net.SCTPPRNone, Value: 0}); err != nil {
+			return err
+		}
 	}
+	if msg.AuthKeyID != 0 {
+		if contract.Auth == nil {
+			return fmt.Errorf("message requested auth key %d without auth contract", msg.AuthKeyID)
+		}
+		if err := conn.ActivateAuthKey(0, msg.AuthKeyID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveContractSCTPAddrs(network string, rawAddrs []string) ([]net.SCTPAddr, error) {
+	if len(rawAddrs) == 0 {
+		return nil, nil
+	}
+	out := make([]net.SCTPAddr, 0, len(rawAddrs))
+	for _, raw := range rawAddrs {
+		addr, err := net.ResolveSCTPAddr(network, raw)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *addr)
+	}
+	return out, nil
+}
+
+func sendContractMessages(conn *net.SCTPConn, messages []messageSpec, contract *scenarioContract) error {
 	for _, msg := range messages {
+		if err := applyMessageSendControls(conn, msg, contract); err != nil {
+			return err
+		}
 		info := &net.SCTPSndInfo{
 			Stream: msg.Stream,
 			PPID:   msg.PPID,
 		}
-		if _, err := conn.WriteToSCTP([]byte(msg.Payload), peer, info); err != nil {
+		if msg.Unordered {
+			info.Flags |= net.SCTPUnordered
+		}
+		payload := materializeMessagePayload(msg)
+		if _, err := conn.WriteToSCTP([]byte(payload), nil, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sendContractMessagesToPeer(conn *net.SCTPConn, peer *net.SCTPAddr, messages []messageSpec, contract *scenarioContract) error {
+	if peer == nil {
+		return fmt.Errorf("no peer address available")
+	}
+	for _, msg := range messages {
+		if err := applyMessageSendControls(conn, msg, contract); err != nil {
+			return err
+		}
+		info := &net.SCTPSndInfo{
+			Stream: msg.Stream,
+			PPID:   msg.PPID,
+		}
+		if msg.Unordered {
+			info.Flags |= net.SCTPUnordered
+		}
+		payload := materializeMessagePayload(msg)
+		if _, err := conn.WriteToSCTP([]byte(payload), peer, info); err != nil {
 			return err
 		}
 	}
@@ -887,8 +1224,9 @@ func readServerMessages(conn *net.SCTPConn, expected []messageSpec) (notificatio
 			continue
 		}
 		want := expected[receivedMessages]
-		if string(buf[:n]) != want.Payload {
-			return summary, fmt.Errorf("unexpected server payload %q, want %q", string(buf[:n]), want.Payload)
+		wantPayload := materializeMessagePayload(want)
+		if string(buf[:n]) != wantPayload {
+			return summary, fmt.Errorf("unexpected server payload %q, want %q", string(buf[:n]), wantPayload)
 		}
 		if info != nil {
 			if info.Stream != want.Stream {
