@@ -41,6 +41,25 @@ GOROOT=$(pwd) ./bin/go run ./misc/sctp-feature-client/go --list-scenarios
 That output is keyed by `feature_id`, so it can be matched directly against the
 dashboard and server API while keeping the FreeBSD server client-agnostic.
 
+## Contract Lifecycle
+
+The Go client does not hardcode per-feature SCTP payloads or peer addresses.
+
+For each feature:
+
+1. it fetches the server catalog with `GET /v1/features`
+2. it creates a session with `POST /v1/sessions`
+3. it calls `POST /v1/sessions/{sessionId}/features/{featureId}/start`
+4. it reads the returned `contract`
+5. the selected handler uses that contract to dial the SCTP endpoint and execute the scenario
+
+In code, `runFeature()` reads `started.Contract`, and handlers such as
+`handleBasicSend()` consume fields like `contract.ClientSendMessages`.
+
+That is why multiple dashboard features can share one Go handler: the handler is
+generic, while the feature-specific payloads and addresses come from the
+FreeBSD server contract.
+
 ## Current Support
 
 Implemented now:
