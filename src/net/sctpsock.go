@@ -744,6 +744,11 @@ func ListenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error) {
 	return listenSCTP(context.Background(), ListenConfig{}, network, laddr)
 }
 
+// OpenSCTP opens an unconnected one-to-many SCTP socket bound to laddr.
+func OpenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error) {
+	return openSCTP(context.Background(), ListenConfig{}, network, laddr)
+}
+
 func listenSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPAddr) (*SCTPConn, error) {
 	switch network {
 	case "sctp", "sctp4", "sctp6":
@@ -757,6 +762,26 @@ func listenSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCT
 	c, err := sl.listenSCTP(ctx, laddr)
 	if err != nil {
 		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+	}
+	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+		c.multiLocal = []SCTPAddr{*la}
+	}
+	return c, nil
+}
+
+func openSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPAddr) (*SCTPConn, error) {
+	switch network {
+	case "sctp", "sctp4", "sctp6":
+	default:
+		return nil, &OpError{Op: "open", Net: network, Source: nil, Addr: laddr.opAddr(), Err: UnknownNetworkError(network)}
+	}
+	if laddr == nil {
+		laddr = &SCTPAddr{}
+	}
+	sl := &sysListener{ListenConfig: lc, network: network, address: laddr.String()}
+	c, err := sl.openSCTP(ctx, laddr)
+	if err != nil {
+		return nil, &OpError{Op: "open", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
 	}
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
 		c.multiLocal = []SCTPAddr{*la}

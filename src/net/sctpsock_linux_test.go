@@ -9,6 +9,7 @@ package net
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -543,6 +544,84 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 	}
 	if err := cli.AddStreams(1, 1); err != nil {
 		t.Fatalf("AddStreams error: %v", err)
+	}
+}
+
+func TestSCTPOneToManyMultiAssocIDs(t *testing.T) {
+	requireSCTP(t)
+
+	srvA, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("ListenSCTP(server A) error: %v", err)
+	}
+	defer srvA.Close()
+	if err := srvA.SetRecvRcvInfo(true); err != nil {
+		t.Fatalf("SetRecvRcvInfo(server A) error: %v", err)
+	}
+	srvB, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("ListenSCTP(server B) error: %v", err)
+	}
+	defer srvB.Close()
+	if err := srvB.SetRecvRcvInfo(true); err != nil {
+		t.Fatalf("SetRecvRcvInfo(server B) error: %v", err)
+	}
+
+	addrA, _ := srvA.LocalAddr().(*SCTPAddr)
+	addrB, _ := srvB.LocalAddr().(*SCTPAddr)
+	if addrA == nil || addrB == nil {
+		t.Fatalf("server LocalAddr types=%T/%T; want *SCTPAddr", srvA.LocalAddr(), srvB.LocalAddr())
+	}
+
+	cli, err := OpenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("OpenSCTP(client one-to-many) error: %v", err)
+	}
+	defer cli.Close()
+
+	msgA := []byte("one-to-many-a")
+	msgB := []byte("one-to-many-b")
+	if _, err := cli.WriteToSCTP(msgA, addrA, &SCTPSndInfo{Stream: 1, PPID: 101}); err != nil {
+		t.Fatalf("WriteToSCTP(server A) error: %v", err)
+	}
+	if _, err := cli.WriteToSCTP(msgB, addrB, &SCTPSndInfo{Stream: 2, PPID: 102}); err != nil {
+		t.Fatalf("WriteToSCTP(server B) error: %v", err)
+	}
+
+	buf := make([]byte, 256)
+	n, _, infoA := readUserMessageSCTP(t, srvA, buf)
+	if got := string(buf[:n]); got != string(msgA) {
+		t.Fatalf("server A payload=%q; want %q", got, msgA)
+	}
+	if infoA == nil || infoA.Stream != 1 || infoA.PPID != 101 {
+		t.Fatalf("server A info=%+v; want stream=1 ppid=101", infoA)
+	}
+	n, _, infoB := readUserMessageSCTP(t, srvB, buf)
+	if got := string(buf[:n]); got != string(msgB) {
+		t.Fatalf("server B payload=%q; want %q", got, msgB)
+	}
+	if infoB == nil || infoB.Stream != 2 || infoB.PPID != 102 {
+		t.Fatalf("server B info=%+v; want stream=2 ppid=102", infoB)
+	}
+
+	var ids []int32
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ids, err = cli.AssocIDs()
+		if err == nil && len(ids) >= 2 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("AssocIDs error: %v", err)
+	}
+	if len(ids) < 2 {
+		t.Fatalf("AssocIDs=%v; want at least two ids", ids)
+	}
+	slices.Sort(ids)
+	if ids[0] == 0 || ids[1] == 0 || ids[0] == ids[1] {
+		t.Fatalf("AssocIDs=%v; want two distinct non-zero ids", ids)
 	}
 }
 
