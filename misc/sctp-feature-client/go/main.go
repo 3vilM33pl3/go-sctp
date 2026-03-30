@@ -55,7 +55,7 @@ func run() int {
 		return 1
 	}
 
-	session, err := client.createSession(context.Background(), cfg.agentName, cfg.environmentName)
+	session, err := client.createSession(context.Background(), cfg.agentName, cfg.environmentName, clientFeatureManifest())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create session: %v\n", err)
 		return 1

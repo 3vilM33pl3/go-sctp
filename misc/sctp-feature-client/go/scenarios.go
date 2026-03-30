@@ -20,45 +20,105 @@ type runner struct {
 
 type featureHandler func(context.Context, *runner, *scenarioContract) (*completionPayload, error)
 
-var supportedFeatureHandlers = map[string]featureHandler{
-	"socket_create":                      handleSocketCreate,
-	"bind_listen_connect":                handleBasicSend,
-	"single_message_boundary":            handleBasicSend,
-	"multi_message_boundary":             handleBasicSend,
-	"stream_id":                          handleBasicSend,
-	"ppid":                               handleBasicSend,
-	"nodelay":                            handleNoDelay,
-	"initmsg":                            handleInitMsg,
-	"rto_assoc_parameters":               handleRTOInfo,
-	"default_sndinfo_recvrcvinfo":        handleDefaultSendInfo,
-	"recvnxtinfo":                        handleRecvNxtInfo,
-	"autoclose":                          handleAutoClose,
-	"notifications":                      handleNotificationScenario,
-	"event_subscription_matrix":          handleNotificationScenario,
-	"association_shutdown_notifications": handleNotificationScenario,
-	"multi_bind":                         handleMultiBind,
-	"local_addr_enum":                    handleLocalAddrEnum,
-	"peer_addr_enum":                     handlePeerAddrEnum,
-	"bindx_add_remove":                   handleBindxAddRemove,
-	"primary_addr_management":            handlePrimaryAddrManagement,
-	"peer_primary_addr_request":          handlePeerPrimaryAddrRequest,
-	"peeloff_assoc":                      handlePeelOffAssoc,
-	"assoc_id_listing":                   handleAssocIDListing,
-	"assoc_status_opt_info":              handleAssocStatus,
-	"stream_reconfig_reset":              handleStreamReset,
-	"stream_reconfig_add_streams":        handleStreamAddStreams,
-	"negative_connect_error":             handleNegativeConnectError,
-	"unordered_delivery":                 handleUnorderedDelivery,
+type scenarioDefinition struct {
+	FeatureID         string
+	DashboardTitle    string
+	DashboardCategory string
+	ImplementationKey string
+	SourceSymbol      string
+	Description       string
+	Handler           featureHandler
+}
+
+// scenarioCatalog mirrors the server/dashboard feature order on purpose.
+// FeatureID is the dashboard/API identifier; ImplementationKey groups shared
+// Go-side logic when multiple dashboard scenarios reuse the same handler.
+var scenarioCatalog = []scenarioDefinition{
+	// Endpoint / association bring-up.
+	{"socket_create", "Create SCTP socket", "endpoint", "socket_create", "handleSocketCreate", "Create an SCTP socket locally and report whether the environment exposes the API.", handleSocketCreate},
+	{"bind_listen_connect", "Bind, listen, and connect", "association", "basic_send", "handleBasicSend", "Dial the server and send one probe payload on a basic SCTP association.", handleBasicSend},
+
+	// Messaging and metadata.
+	{"single_message_boundary", "Single message boundary", "messaging", "basic_send", "handleBasicSend", "Send one SCTP message and rely on the server to verify boundary preservation.", handleBasicSend},
+	{"multi_message_boundary", "Multiple message boundaries", "messaging", "basic_send", "handleBasicSend", "Send two SCTP messages in order and preserve boundaries.", handleBasicSend},
+	{"stream_id", "Stream identifier metadata", "metadata", "basic_send", "handleBasicSend", "Send the probe payload on a specific SCTP stream.", handleBasicSend},
+	{"ppid", "PPID metadata", "metadata", "basic_send", "handleBasicSend", "Send the probe payload with a specific SCTP PPID.", handleBasicSend},
+	{"nodelay", "SCTP_NODELAY", "socket_option", "nodelay", "handleNoDelay", "Enable SCTP_NODELAY before sending the probe payload.", handleNoDelay},
+	{"initmsg", "SCTP_INITMSG", "socket_option", "initmsg", "handleInitMsg", "Apply SCTP_INITMSG before association setup and then send the probe payload.", handleInitMsg},
+	{"rto_assoc_parameters", "SCTP_RTOINFO", "socket_option", "rto_info", "handleRTOInfo", "Apply association RTO parameters and send the probe payload.", handleRTOInfo},
+	{"default_sndinfo_recvrcvinfo", "SCTP_DEFAULT_SNDINFO / RECVRCVINFO", "metadata", "default_send_info", "handleDefaultSendInfo", "Set default send metadata and confirm it via RECVRCVINFO.", handleDefaultSendInfo},
+	{"unordered_delivery", "Unordered delivery", "messaging", "unordered_delivery", "handleUnorderedDelivery", "Attempt unordered SCTP delivery and report whether the environment accepts it.", handleUnorderedDelivery},
+	{"recvnxtinfo", "SCTP_RECVNXTINFO", "metadata", "recv_nxtinfo", "handleRecvNxtInfo", "Receive two server messages and report next-message metadata from the first receive.", handleRecvNxtInfo},
+	{"autoclose", "SCTP_AUTOCLOSE", "socket_option", "autoclose", "handleAutoClose", "Attempt to configure SCTP_AUTOCLOSE on the client socket and report whether it is accepted.", handleAutoClose},
+
+	// Events and notifications.
+	{"notifications", "Association and shutdown notifications", "events", "notification_observer", "handleNotificationScenario", "Subscribe to SCTP notifications and report the association and shutdown events observed.", handleNotificationScenario},
+	{"event_subscription_matrix", "Event subscription matrix", "events", "notification_observer", "handleNotificationScenario", "Subscribe to the available SCTP events and report which notifications were delivered.", handleNotificationScenario},
+	{"association_shutdown_notifications", "Association shutdown notifications", "events", "notification_observer", "handleNotificationScenario", "Observe graceful association teardown notifications after the server trigger.", handleNotificationScenario},
+
+	// Multihoming and address control.
+	{"multi_bind", "Multihome reference server", "multihoming", "multi_bind", "handleMultiBind", "Connect to the reference server using all advertised peer addresses.", handleMultiBind},
+	{"local_addr_enum", "Local address enumeration", "multihoming", "local_addr_enum", "handleLocalAddrEnum", "Enumerate the client's local SCTP addresses after association setup.", handleLocalAddrEnum},
+	{"peer_addr_enum", "Peer address enumeration", "multihoming", "peer_addr_enum", "handlePeerAddrEnum", "Enumerate the server's SCTP addresses after association setup.", handlePeerAddrEnum},
+	{"bindx_add_remove", "SCTP_BINDX add/remove", "multihoming", "bindx_add_remove", "handleBindxAddRemove", "Exercise local SCTP bindx add/remove controls before connecting.", handleBindxAddRemove},
+	{"primary_addr_management", "Primary address management", "multihoming", "primary_addr_management", "handlePrimaryAddrManagement", "Attempt a local primary-address change on a multihomed association.", handlePrimaryAddrManagement},
+	{"peer_primary_addr_request", "Peer primary address request", "multihoming", "peer_primary_addr_request", "handlePeerPrimaryAddrRequest", "Attempt a peer primary-address change request on a multihomed association.", handlePeerPrimaryAddrRequest},
+
+	// Association management and introspection.
+	{"peeloff_assoc", "Association peeloff", "association", "peeloff_assoc", "handlePeelOffAssoc", "Attempt to peel the association onto a dedicated SCTP socket.", handlePeelOffAssoc},
+	{"assoc_id_listing", "Association identifier listing", "association", "assoc_id_listing", "handleAssocIDListing", "Enumerate association identifiers after sending the probe payload.", handleAssocIDListing},
+	{"assoc_status_opt_info", "SCTP_STATUS / opt_info", "introspection", "assoc_status", "handleAssocStatus", "Query association status and report the returned state summary.", handleAssocStatus},
+
+	// Reconfiguration.
+	{"stream_reconfig_reset", "Stream reconfiguration reset", "reconfiguration", "stream_reset", "handleStreamReset", "Attempt SCTP stream reset on the active association after the server trigger.", handleStreamReset},
+	{"stream_reconfig_add_streams", "Stream reconfiguration add streams", "reconfiguration", "stream_add_streams", "handleStreamAddStreams", "Attempt SCTP stream addition on the active association after the server trigger.", handleStreamAddStreams},
+
+	// Negative/error path.
+	{"negative_connect_error", "Negative connect path", "error_path", "negative_connect_error", "handleNegativeConnectError", "Attempt an invalid SCTP connection target and report the surfaced error.", handleNegativeConnectError},
+}
+
+var scenarioByFeatureID = buildScenarioIndex()
+
+func buildScenarioIndex() map[string]scenarioDefinition {
+	out := make(map[string]scenarioDefinition, len(scenarioCatalog))
+	for _, scenario := range scenarioCatalog {
+		out[scenario.FeatureID] = scenario
+	}
+	return out
+}
+
+func clientFeatureManifest() []clientFeatureMapping {
+	out := make([]clientFeatureMapping, 0, len(scenarioCatalog))
+	for _, scenario := range scenarioCatalog {
+		out = append(out, clientFeatureMapping{
+			FeatureID:         scenario.FeatureID,
+			ImplementationKey: scenario.ImplementationKey,
+			SourceSymbol:      scenario.SourceSymbol,
+			SourcePath:        "misc/sctp-feature-client/go/scenarios.go",
+			Description:       scenario.Description,
+		})
+	}
+	return out
 }
 
 func (r *runner) runFeature(ctx context.Context, sessionID string, feature catalogFeature) (*featureState, error) {
-	handler, ok := supportedFeatureHandlers[feature.ID]
+	scenario, ok := scenarioByFeatureID[feature.ID]
 	if !ok {
 		return r.client.unsupportedFeature(ctx, sessionID, feature.ID, unsupportedPayload{
 			Reason:       "unmapped feature",
 			EvidenceKind: "client_gap",
 			EvidenceText: "the go-sctp feature client does not implement this feature id",
 		})
+	}
+	if scenario.DashboardTitle != feature.Title || scenario.DashboardCategory != feature.Category {
+		return nil, fmt.Errorf(
+			"feature %s metadata drift: client has %q/%q, server has %q/%q",
+			feature.ID,
+			scenario.DashboardCategory,
+			scenario.DashboardTitle,
+			feature.Category,
+			feature.Title,
+		)
 	}
 
 	started, err := r.client.startFeature(ctx, sessionID, feature.ID)
@@ -69,7 +129,7 @@ func (r *runner) runFeature(ctx context.Context, sessionID string, feature catal
 		return nil, fmt.Errorf("feature %s did not include a contract", feature.ID)
 	}
 
-	completion, err := handler(ctx, r, started.Contract)
+	completion, err := scenario.Handler(ctx, r, started.Contract)
 	if err != nil {
 		return nil, err
 	}
@@ -937,9 +997,9 @@ func renderSCTPAddrs(addrs []net.SCTPAddr) string {
 }
 
 func mustFeatureIDs() []string {
-	ids := make([]string, 0, len(supportedFeatureHandlers))
-	for id := range supportedFeatureHandlers {
-		ids = append(ids, id)
+	ids := make([]string, 0, len(scenarioCatalog))
+	for _, scenario := range scenarioCatalog {
+		ids = append(ids, scenario.FeatureID)
 	}
 	slices.Sort(ids)
 	return ids

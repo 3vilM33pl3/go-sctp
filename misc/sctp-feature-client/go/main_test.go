@@ -32,10 +32,46 @@ func TestBuildEventMask(t *testing.T) {
 	}
 }
 
-func TestFeatureMappingsDoNotOverlap(t *testing.T) {
-	for id := range supportedFeatureHandlers {
-		if id == "" {
-			t.Fatal("supported feature id should not be empty")
+func TestScenarioCatalogIsWellFormed(t *testing.T) {
+	seen := make(map[string]bool, len(scenarioCatalog))
+	for _, scenario := range scenarioCatalog {
+		if scenario.FeatureID == "" {
+			t.Fatal("scenario feature id should not be empty")
+		}
+		if scenario.DashboardTitle == "" || scenario.DashboardCategory == "" {
+			t.Fatalf("scenario %q missing dashboard metadata: %+v", scenario.FeatureID, scenario)
+		}
+		if scenario.ImplementationKey == "" || scenario.SourceSymbol == "" {
+			t.Fatalf("scenario %q missing implementation metadata: %+v", scenario.FeatureID, scenario)
+		}
+		if scenario.Handler == nil {
+			t.Fatalf("scenario %q missing handler", scenario.FeatureID)
+		}
+		if seen[scenario.FeatureID] {
+			t.Fatalf("duplicate scenario feature id %q", scenario.FeatureID)
+		}
+		seen[scenario.FeatureID] = true
+	}
+}
+
+func TestClientFeatureManifestMatchesScenarioCatalog(t *testing.T) {
+	manifest := clientFeatureManifest()
+	if len(manifest) != len(scenarioCatalog) {
+		t.Fatalf("len(manifest)=%d, want %d", len(manifest), len(scenarioCatalog))
+	}
+	for i, entry := range manifest {
+		scenario := scenarioCatalog[i]
+		if entry.FeatureID != scenario.FeatureID {
+			t.Fatalf("manifest[%d].FeatureID=%q, want %q", i, entry.FeatureID, scenario.FeatureID)
+		}
+		if entry.ImplementationKey != scenario.ImplementationKey {
+			t.Fatalf("manifest[%d].ImplementationKey=%q, want %q", i, entry.ImplementationKey, scenario.ImplementationKey)
+		}
+		if entry.SourceSymbol != scenario.SourceSymbol {
+			t.Fatalf("manifest[%d].SourceSymbol=%q, want %q", i, entry.SourceSymbol, scenario.SourceSymbol)
+		}
+		if entry.SourcePath == "" || entry.Description == "" {
+			t.Fatalf("manifest[%d] missing path or description: %+v", i, entry)
 		}
 	}
 }
