@@ -832,23 +832,29 @@ func handleASCONFAddRemove(ctx context.Context, _ *runner, contract *scenarioCon
 	if err != nil {
 		return nil, err
 	}
+	var opErr error
 	if len(addAddrs) > 0 {
-		if err := conn.BindAddrs(addAddrs); err != nil {
-			return nil, err
-		}
+		opErr = conn.BindAddrs(addAddrs)
 	}
-	if len(removeAddrs) > 0 {
-		if err := conn.UnbindAddrs(removeAddrs); err != nil {
-			return nil, err
-		}
+	if opErr == nil && len(removeAddrs) > 0 {
+		opErr = conn.UnbindAddrs(removeAddrs)
 	}
 	if err := sendContractMessages(conn, contract.ClientSendMessages, contract); err != nil {
 		return nil, err
 	}
+	evidence := fmt.Sprintf("attempted dynamic address reconfiguration add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses)
+	report := fmt.Sprintf("client attempted SCTP ASCONF add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses)
+	if opErr != nil {
+		evidence = fmt.Sprintf("dynamic address reconfiguration was not accepted: %v", opErr)
+		report = "client attempted SCTP ASCONF add/remove, but the API call was not accepted"
+	} else if len(addAddrs) > 0 || len(removeAddrs) > 0 {
+		evidence = fmt.Sprintf("dynamic address reconfiguration add=%v remove=%v was accepted", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses)
+		report = fmt.Sprintf("client added and removed SCTP addresses add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses)
+	}
 	return &completionPayload{
 		EvidenceKind: "runtime",
-		EvidenceText: fmt.Sprintf("attempted dynamic address reconfiguration add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses),
-		ReportText:   fmt.Sprintf("client attempted SCTP ASCONF add=%v remove=%v", contract.AddressReconfig.AddAddresses, contract.AddressReconfig.RemoveAddresses),
+		EvidenceText: evidence,
+		ReportText:   report,
 	}, nil
 }
 
@@ -1044,30 +1050,15 @@ func dialContractWithAuth(ctx context.Context, contract *scenarioContract) (*net
 	if contract.Auth == nil {
 		return nil, fmt.Errorf("missing auth contract")
 	}
-	if len(contract.ConnectAddresses) == 0 {
-		return nil, fmt.Errorf("feature %s did not provide connect addresses", contract.FeatureID)
-	}
-	dialer := net.Dialer{
-		ControlContext: func(_ context.Context, network, address string, c syscall.RawConn) error {
-			var controlErr error
-			if err := c.Control(func(fd uintptr) {
-				controlErr = rawConfigureAuthSocket(int(fd), contract.Auth)
-			}); err != nil {
-				return err
-			}
-			return controlErr
-		},
-	}
-	conn, err := dialer.DialContext(ctx, contract.Transport, contract.ConnectAddresses[0])
+	conn, err := dialContract(contract)
 	if err != nil {
 		return nil, err
 	}
-	sctpConn, ok := conn.(*net.SCTPConn)
-	if !ok {
+	if err := applyAuthContract(conn, contract.Auth); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("DialContext returned %T, want *net.SCTPConn", conn)
+		return nil, err
 	}
-	return sctpConn, nil
+	return conn, nil
 }
 
 func materializeMessagePayload(msg messageSpec) string {
