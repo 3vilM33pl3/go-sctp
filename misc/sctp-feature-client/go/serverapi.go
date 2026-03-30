@@ -49,25 +49,68 @@ type sessionResponse struct {
 }
 
 type messageSpec struct {
-	Payload string `json:"payload"`
-	Stream  uint16 `json:"stream"`
-	PPID    uint32 `json:"ppid"`
+	Payload   string `json:"payload"`
+	Stream    uint16 `json:"stream"`
+	PPID      uint32 `json:"ppid"`
+	SizeBytes int    `json:"size_bytes,omitempty"`
+	Unordered bool   `json:"unordered,omitempty"`
+	PRPolicy  string `json:"pr_policy,omitempty"`
+	PRValue   uint32 `json:"pr_value,omitempty"`
+	AuthKeyID uint16 `json:"auth_key_id,omitempty"`
+}
+
+type authContract struct {
+	ChunkTypes      []uint8 `json:"chunk_types"`
+	PrimaryKeyID    uint16  `json:"primary_key_id"`
+	PrimarySecret   string  `json:"primary_secret"`
+	SecondaryKeyID  uint16  `json:"secondary_key_id"`
+	SecondarySecret string  `json:"secondary_secret"`
+}
+
+type addressReconfigContract struct {
+	AddAddresses    []string `json:"add_addresses"`
+	RemoveAddresses []string `json:"remove_addresses"`
+}
+
+type interleavingContract struct {
+	FragmentInterleaveLevel int    `json:"fragment_interleave_level"`
+	LargeMessageSize        int    `json:"large_message_size"`
+	LargeStream             uint16 `json:"large_stream"`
+	LargePPID               uint32 `json:"large_ppid"`
+	SmallStream             uint16 `json:"small_stream"`
+	SmallPPID               uint32 `json:"small_ppid"`
+	SmallMessageCount       int    `json:"small_message_count"`
+}
+
+type schedulerContract struct {
+	Policy          string `json:"policy"`
+	PrimaryStream   uint16 `json:"primary_stream"`
+	SecondaryStream uint16 `json:"secondary_stream"`
+	PrimaryValue    uint16 `json:"primary_value"`
+	SecondaryValue  uint16 `json:"secondary_value"`
+	MessageCount    int    `json:"message_count"`
 }
 
 type scenarioContract struct {
-	FeatureID          string        `json:"feature_id"`
-	CompletionMode     string        `json:"completion_mode"`
-	Transport          string        `json:"transport"`
-	ConnectAddresses   []string      `json:"connect_addresses"`
-	ClientSocketOpts   []string      `json:"client_socket_options"`
-	ClientSubs         []string      `json:"client_subscriptions"`
-	ClientSendMessages []messageSpec `json:"client_send_messages"`
-	ServerSendMessages []messageSpec `json:"server_send_messages"`
-	TriggerPayload     string        `json:"trigger_payload"`
-	NegativeTarget     string        `json:"negative_connect_target"`
-	TimeoutSeconds     int           `json:"timeout_seconds"`
-	ReportPrompt       string        `json:"report_prompt"`
-	InstructionsText   string        `json:"instructions_text"`
+	FeatureID               string                   `json:"feature_id"`
+	CompletionMode          string                   `json:"completion_mode"`
+	Transport               string                   `json:"transport"`
+	ConnectAddresses        []string                 `json:"connect_addresses"`
+	ClientSocketOpts        []string                 `json:"client_socket_options"`
+	ClientSubs              []string                 `json:"client_subscriptions"`
+	ClientSendMessages      []messageSpec            `json:"client_send_messages"`
+	ServerSendMessages      []messageSpec            `json:"server_send_messages"`
+	TriggerPayload          string                   `json:"trigger_payload"`
+	NegativeTarget          string                   `json:"negative_connect_target"`
+	TimeoutSeconds          int                      `json:"timeout_seconds"`
+	ManualSetupRequired     bool                     `json:"manual_setup_required"`
+	ManualSetupInstructions []string                 `json:"manual_setup_instructions"`
+	ReportPrompt            string                   `json:"report_prompt"`
+	InstructionsText        string                   `json:"instructions_text"`
+	Auth                    *authContract            `json:"auth,omitempty"`
+	AddressReconfig         *addressReconfigContract `json:"address_reconfig,omitempty"`
+	Interleaving            *interleavingContract    `json:"interleaving,omitempty"`
+	Scheduler               *schedulerContract       `json:"scheduler,omitempty"`
 }
 
 type featureState struct {
