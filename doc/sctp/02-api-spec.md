@@ -50,10 +50,13 @@
 
 ## Compatibility Notes
 
-- Linux is the only fully supported platform in v1.
-- Non-Linux builds compile via stubs and return unsupported errors at runtime.
+- Linux and FreeBSD 15/amd64 are supported SCTP platforms.
+- Other non-Linux builds still compile via stubs and return unsupported errors at runtime.
 - `SCTPRcvInfo.Next` is populated when `SetRecvNxtInfo(true)` is enabled and
   the kernel supplies `SCTP_NXTINFO` ancillary data.
 - Dialed SCTP sockets use Linux `connectx` internally so association-level APIs
   such as `AssocIDs`, `AssocStatus`, peeloff, primary-address management, and
   stream reconfiguration can target a live association.
+- On FreeBSD 15, the same exported SCTP API is available, but some association
+  controls still rely on post-association metadata rather than an immediately
+  enumerable assoc-id list on one-to-one sockets.
