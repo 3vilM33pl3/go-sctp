@@ -8,6 +8,7 @@ import (
 	"context"
 	"internal/strconv"
 	"net/netip"
+	"runtime"
 	"syscall"
 )
 
@@ -670,6 +671,49 @@ func dialSCTPInit(ctx context.Context, dialer *Dialer, network string, laddr, ra
 	d := &Dialer{}
 	if dialer != nil {
 		*d = *dialer
+	}
+	if runtime.GOOS == "freebsd" {
+		c, err := openDialSCTP(ctx, d, network, laddr, raddr)
+		if err != nil {
+			return nil, err
+		}
+		if err := setSCTPInitOptions(c.fd, opts); err != nil {
+			c.Close()
+			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+		}
+		var lsa syscall.Sockaddr
+		if laddr != nil {
+			var err error
+			lsa, err = laddr.sockaddr(c.fd.family)
+			if err != nil {
+				c.Close()
+				return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+			}
+		}
+		rsa, err := raddr.sockaddr(c.fd.family)
+		if err != nil {
+			c.Close()
+			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+		}
+		crsa, err := c.fd.connect(ctx, lsa, rsa)
+		if err != nil {
+			c.Close()
+			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+		}
+		c.fd.isConnected = true
+		if lsa != nil {
+			c.fd.laddr = c.fd.addrFunc()(lsa)
+		}
+		if crsa != nil {
+			c.fd.raddr = c.fd.addrFunc()(crsa)
+		} else {
+			c.fd.raddr = c.fd.addrFunc()(rsa)
+		}
+		c.multiPeer = []SCTPAddr{*raddr}
+		if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+			c.multiLocal = []SCTPAddr{*la}
+		}
+		return c, nil
 	}
 	prevCtx := d.ControlContext
 	prev := d.Control
