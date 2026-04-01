@@ -14,22 +14,6 @@ import (
 	"unsafe"
 )
 
-const (
-	msgNotification               = 0x8000
-	sctpNotificationAssocChange   = 0x8001
-	sctpNotificationPeerAddr      = 0x8002
-	sctpNotificationSendFailed    = 0x8003
-	sctpNotificationShutdown      = 0x8005
-	sctpNotificationPartialDeliv  = 0x8006
-	sctpNotificationAdaptation    = 0x8007
-	sctpNotificationAuth          = 0x8008
-	sctpNotificationSenderDry     = 0x8009
-	sctpNotificationStreamReset   = 0x800a
-	sctpNotificationAssocReset    = 0x800b
-	sctpNotificationStreamChange  = 0x800c
-	sctpNotificationSendFailedEvt = 0x800d
-)
-
 type runner struct {
 	client *featureServerClient
 }
@@ -1195,22 +1179,34 @@ func handleStreamSchedulerValue(ctx context.Context, _ *runner, contract *scenar
 	if err := conn.SetStreamScheduler(policy); err != nil {
 		return nil, err
 	}
-	if err := conn.SetStreamSchedulerValue(contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue); err != nil {
-		return nil, err
-	}
-	if err := conn.SetStreamSchedulerValue(contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue); err != nil {
-		return nil, err
-	}
 	if err := conn.SetRecvRcvInfo(true); err != nil {
 		return nil, err
 	}
-	if _, err := runTriggerAndRead(conn, contract); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(contract.TimeoutSeconds) * time.Second)); err != nil {
 		return nil, err
+	}
+	if contract.TriggerPayload != "" {
+		if _, err := conn.WriteToSCTP([]byte(contract.TriggerPayload), nil, nil); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := readServerMessages(conn, contract.ServerSendMessages); err != nil {
+		return nil, err
+	}
+	opErr := conn.SetStreamSchedulerValue(contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue)
+	if opErr == nil {
+		opErr = conn.SetStreamSchedulerValue(contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue)
+	}
+	evidence := fmt.Sprintf("SetStreamSchedulerValue succeeded for streams %d/%d with values %d/%d", contract.Scheduler.PrimaryStream, contract.Scheduler.SecondaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryValue)
+	report := fmt.Sprintf("client applied scheduler values stream %d=%d and stream %d=%d", contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue)
+	if opErr != nil {
+		evidence = fmt.Sprintf("SetStreamSchedulerValue was not accepted: %v", opErr)
+		report = "client attempted SCTP stream scheduler values, but the API call was not accepted"
 	}
 	return &completionPayload{
 		EvidenceKind: "runtime",
-		EvidenceText: fmt.Sprintf("SetStreamSchedulerValue succeeded for streams %d/%d with values %d/%d", contract.Scheduler.PrimaryStream, contract.Scheduler.SecondaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryValue),
-		ReportText:   fmt.Sprintf("client applied scheduler values stream %d=%d and stream %d=%d", contract.Scheduler.PrimaryStream, contract.Scheduler.PrimaryValue, contract.Scheduler.SecondaryStream, contract.Scheduler.SecondaryValue),
+		EvidenceText: evidence,
+		ReportText:   report,
 	}, nil
 }
 
