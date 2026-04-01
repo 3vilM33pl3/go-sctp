@@ -19,10 +19,23 @@ Run from the `go-sctp` repository root:
 GOROOT=$(pwd) ./bin/go build ./misc/sctp-feature-client/go
 ```
 
+Cross-build a FreeBSD client binary from the same tree:
+
+```bash
+GO111MODULE=off GOROOT=$(pwd) GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 \
+  ./bin/go build -o /tmp/go-sctp-feature-client-freebsd ./misc/sctp-feature-client/go
+```
+
 ## Run
 
 ```bash
 GOROOT=$(pwd) ./bin/go run ./misc/sctp-feature-client/go --base-url http://free.metatao.net:18080
+```
+
+On FreeBSD 15, run the FreeBSD binary directly against the same server:
+
+```bash
+/tmp/go-sctp-feature-client-freebsd --base-url http://free.metatao.net:18080
 ```
 
 Optional flags:
@@ -111,5 +124,6 @@ Manual-setup scenarios currently exposed by the server and skipped by default in
 - Local validation runs with:
   - `GOROOT=$(pwd) ./bin/go test net -run '^TestSCTP' -count=1`
   - `GO111MODULE=off GOROOT=$(pwd) ./bin/go test ./misc/sctp-feature-client/go -count=1`
-- Full end-to-end validation against the FreeBSD reference server still requires
-  a Linux host with real SCTP reachability to `free.metatao.net`.
+- The default non-manual conformance sweep also runs from FreeBSD 15 against
+  the FreeBSD reference server. A recent validated session was
+  `135e7f12c626fcc7` on `free.metatao.net`.
