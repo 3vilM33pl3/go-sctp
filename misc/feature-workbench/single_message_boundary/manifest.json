@@ -1,0 +1,55 @@
+{
+  "feature_id": "single_message_boundary",
+  "language": "go",
+  "build": [
+    {
+      "cwd": "{helper_source}",
+      "env": {
+        "GOROOT": "{lang_root}",
+        "GO111MODULE": "off"
+      },
+      "command": [
+        "{go_bin}",
+        "build",
+        "-o",
+        "{helper_binary}",
+        "."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "two_messages_preserve_boundaries",
+      "title": "Two SCTP messages preserve boundaries",
+      "timeout_seconds": 10,
+      "server": {
+        "cwd": "{lang_root}",
+        "command": [
+          "{helper_binary}",
+          "server",
+          "--bind",
+          "{server_host}:{server_port}",
+          "--read-messages",
+          "2"
+        ]
+      },
+      "client": {
+        "cwd": "{lang_root}",
+        "command": [
+          "{helper_binary}",
+          "client",
+          "--connect",
+          "{server_host}:{server_port}",
+          "--message",
+          "alpha:1:100",
+          "--message",
+          "beta:1:101"
+        ]
+      },
+      "assertions": {
+        "server_recv_count": 2,
+        "server_payloads": ["alpha", "beta"]
+      }
+    }
+  ]
+}

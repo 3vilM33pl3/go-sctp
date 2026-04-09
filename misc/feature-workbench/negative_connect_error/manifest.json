@@ -1,0 +1,43 @@
+{
+  "feature_id": "negative_connect_error",
+  "language": "go",
+  "build": [
+    {
+      "cwd": "{helper_source}",
+      "env": {
+        "GOROOT": "{lang_root}",
+        "GO111MODULE": "off"
+      },
+      "command": [
+        "{go_bin}",
+        "build",
+        "-o",
+        "{helper_binary}",
+        "."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "invalid_destination_surfaces_connect_or_send_error",
+      "title": "Invalid destination surfaces a connection error",
+      "timeout_seconds": 10,
+      "client": {
+        "cwd": "{lang_root}",
+        "command": [
+          "{helper_binary}",
+          "client",
+          "--connect",
+          "0.0.0.0:1",
+          "--expect-failure",
+          "connect_or_send",
+          "--message",
+          "should-not-send:1:1"
+        ]
+      },
+      "assertions": {
+        "expected_failure": ["connect", "send"]
+      }
+    }
+  ]
+}
