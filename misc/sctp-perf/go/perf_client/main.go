@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	clientMsgNotification = 0x8000
+	clientMsgNotification = net.SCTPMsgNotification
 
 	clientFrameData   = byte(1)
 	clientFrameStop   = byte(2)

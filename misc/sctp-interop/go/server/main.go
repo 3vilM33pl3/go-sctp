@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const msgNotification = 0x8000
-
 func main() {
 	host := "127.0.0.1"
 	port := 19000
@@ -37,6 +35,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close()
+	// The harness starts servers on port 0 and reads the chosen port here.
+	fmt.Printf("GO_SERVER_LISTEN port=%d\n", conn.LocalAddr().(*net.SCTPAddr).Port)
 
 	_ = conn.SetInitOptions(net.SCTPInitOptions{NumOStreams: 8, MaxInStreams: 8})
 	_ = conn.SubscribeEvents(net.SCTPEventMask{Association: true, Shutdown: true, DataIO: true})
@@ -49,7 +49,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ReadFromSCTP: %v\n", err)
 			os.Exit(1)
 		}
-		if flags&msgNotification != 0 {
+		if flags&net.SCTPMsgNotification != 0 {
 			fmt.Printf("GO_SERVER_NOTIFY flags=%d\n", flags)
 			continue
 		}

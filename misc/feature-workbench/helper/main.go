@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const sctpMsgNotification = 0x8000
+const sctpMsgNotification = net.SCTPMsgNotification
 
 type messageSpec struct {
 	payload string
