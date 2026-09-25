@@ -17,10 +17,7 @@ var errSCTPUnsupported = errors.New("sctp is not supported on this platform")
 func sockaddrToSCTP(syscall.Sockaddr) Addr { return nil }
 
 func (a *SCTPAddr) family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.AF_INET
-	}
-	if a.IP.To4() != nil {
+	if a.isIPv4() {
 		return syscall.AF_INET
 	}
 	return syscall.AF_INET6
@@ -51,6 +48,20 @@ func (sd *sysDialer) dialSCTP(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn,
 
 func (sl *sysListener) listenSCTP(context.Context, *SCTPAddr) (*SCTPConn, error) {
 	return nil, errSCTPUnsupported
+}
+
+func (sd *sysDialer) openSCTP(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}
+
+func (sl *sysListener) openSCTP(context.Context, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}
+
+// dialSCTPInitPlatform lets a platform take over DialSCTPInit entirely; no
+// platform-specific path exists here.
+func dialSCTPInitPlatform(context.Context, *Dialer, string, *SCTPAddr, *SCTPAddr, SCTPInitOptions) (*SCTPConn, bool, error) {
+	return nil, false, nil
 }
 
 func sctpOOBBufferSize() int { return 0 }

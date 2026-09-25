@@ -29,6 +29,20 @@ func (sl *sysListener) listenSCTP(context.Context, *SCTPAddr) (*SCTPConn, error)
 	return nil, errSCTPUnsupported
 }
 
+func (sd *sysDialer) openSCTP(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}
+
+func (sl *sysListener) openSCTP(context.Context, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}
+
+// dialSCTPInitPlatform lets a platform take over DialSCTPInit entirely; no
+// platform-specific path exists here.
+func dialSCTPInitPlatform(context.Context, *Dialer, string, *SCTPAddr, *SCTPAddr, SCTPInitOptions) (*SCTPConn, bool, error) {
+	return nil, false, nil
+}
+
 func sctpOOBBufferSize() int { return 0 }
 
 func marshalSCTPSndInfo(*SCTPSndInfo) ([]byte, error) { return nil, errSCTPUnsupported }

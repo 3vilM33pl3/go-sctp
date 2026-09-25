@@ -7,6 +7,7 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"syscall"
@@ -1010,11 +1011,7 @@ func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTP
 		syscall.Close(int(sysfd))
 		return nil, wrapSyscallError("getsockopt", err)
 	}
-	fd, err := newFD(int(sysfd), family, sotype, net)
-	if err != nil {
-		syscall.Close(int(sysfd))
-		return nil, err
-	}
+	fd := newFD(int(sysfd), family, sotype, net)
 	if err := fd.init(); err != nil {
 		fd.Close()
 		return nil, err
@@ -1037,3 +1034,51 @@ func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTP
 func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
 
 func ntohs(v uint16) uint16 { return (v << 8) | (v >> 8) }
+
+// dialSCTPInitPlatform implements DialSCTPInit on FreeBSD: the socket is opened
+// unconnected, SCTP_INITMSG is applied, and only then is connect(2) issued, since
+// FreeBSD rejects INITMSG changes on a connecting one-to-one socket.
+func dialSCTPInitPlatform(ctx context.Context, d *Dialer, network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, bool, error) {
+	c, err := openDialSCTP(ctx, d, network, laddr, raddr)
+	if err != nil {
+		return nil, true, err
+	}
+	if err := setSCTPInitOptions(c.fd, opts); err != nil {
+		c.Close()
+		return nil, true, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+	}
+	var lsa syscall.Sockaddr
+	if laddr != nil {
+		var err error
+		lsa, err = laddr.sockaddr(c.fd.family)
+		if err != nil {
+			c.Close()
+			return nil, true, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+		}
+	}
+	rsa, err := raddr.sockaddr(c.fd.family)
+	if err != nil {
+		c.Close()
+		return nil, true, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+	}
+	crsa, err := c.fd.connect(ctx, lsa, rsa)
+	if err != nil {
+		c.Close()
+		return nil, true, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+	}
+	c.fd.isConnected = true
+	if lsa != nil {
+		c.fd.laddr = c.fd.addrFunc()(lsa)
+	}
+	if crsa != nil {
+		c.fd.raddr = c.fd.addrFunc()(crsa)
+	} else {
+		c.fd.raddr = c.fd.addrFunc()(rsa)
+	}
+	c.multiPeer = []SCTPAddr{*raddr}
+	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+		c.multiLocal = []SCTPAddr{*la}
+	}
+	return c, true, nil
+
+}

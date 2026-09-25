@@ -8,7 +8,6 @@ import (
 	"context"
 	"internal/strconv"
 	"net/netip"
-	"runtime"
 	"syscall"
 )
 
@@ -17,6 +16,14 @@ type SCTPAddr struct {
 	IP   IP
 	Port int
 	Zone string // IPv6 scoped addressing zone
+}
+
+// isIPv4 reports whether a binds as an IPv4 socket. A nil or wildcard
+// address counts as IPv4, matching (*TCPAddr).family; it is kept free of
+// syscall constants so untagged code can compare address families on
+// every GOOS.
+func (a *SCTPAddr) isIPv4() bool {
+	return a == nil || len(a.IP) <= IPv4len || a.IP.To4() != nil
 }
 
 // AddrPort returns the [SCTPAddr] a as a [netip.AddrPort].
@@ -672,48 +679,8 @@ func dialSCTPInit(ctx context.Context, dialer *Dialer, network string, laddr, ra
 	if dialer != nil {
 		*d = *dialer
 	}
-	if runtime.GOOS == "freebsd" {
-		c, err := openDialSCTP(ctx, d, network, laddr, raddr)
-		if err != nil {
-			return nil, err
-		}
-		if err := setSCTPInitOptions(c.fd, opts); err != nil {
-			c.Close()
-			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-		}
-		var lsa syscall.Sockaddr
-		if laddr != nil {
-			var err error
-			lsa, err = laddr.sockaddr(c.fd.family)
-			if err != nil {
-				c.Close()
-				return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-			}
-		}
-		rsa, err := raddr.sockaddr(c.fd.family)
-		if err != nil {
-			c.Close()
-			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-		}
-		crsa, err := c.fd.connect(ctx, lsa, rsa)
-		if err != nil {
-			c.Close()
-			return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
-		}
-		c.fd.isConnected = true
-		if lsa != nil {
-			c.fd.laddr = c.fd.addrFunc()(lsa)
-		}
-		if crsa != nil {
-			c.fd.raddr = c.fd.addrFunc()(crsa)
-		} else {
-			c.fd.raddr = c.fd.addrFunc()(rsa)
-		}
-		c.multiPeer = []SCTPAddr{*raddr}
-		if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-			c.multiLocal = []SCTPAddr{*la}
-		}
-		return c, nil
+	if c, handled, err := dialSCTPInitPlatform(ctx, d, network, laddr, raddr, opts); handled {
+		return c, err
 	}
 	prevCtx := d.ControlContext
 	prev := d.Control
