@@ -116,97 +116,105 @@ func SCTPAddrFromAddrPort(addr netip.AddrPort) *SCTPAddr {
 	}
 }
 
-// SCTPInitOptions configures SCTP association setup parameters.
+// SCTPInitOptions carries the association parameters proposed in the INIT
+// chunk (struct sctp_initmsg). A zero field keeps the kernel's default.
 type SCTPInitOptions struct {
-	NumOStreams    uint16
-	MaxInStreams   uint16
-	MaxAttempts    uint16
-	MaxInitTimeout uint16
+	NumOStreams    uint16 // outbound streams to request
+	MaxInStreams   uint16 // inbound streams to accept
+	MaxAttempts    uint16 // INIT retransmissions before the attempt fails
+	MaxInitTimeout uint16 // upper bound on the INIT retransmission timer, in milliseconds
 }
 
-// SCTPSndInfo controls per-message SCTP metadata for sends.
+// SCTPSndInfo is the per-message send metadata (struct sctp_sndinfo).
 type SCTPSndInfo struct {
-	Stream  uint16
-	Flags   uint16
-	PPID    uint32
-	Context uint32
-	AssocID int32
+	Stream  uint16 // outbound stream number
+	Flags   uint16 // SCTPUnordered and the kernel's other SCTP_* send flags
+	PPID    uint32 // payload protocol identifier, carried opaquely to the receiver
+	Context uint32 // opaque value returned in send-failure notifications
+	AssocID int32  // association, on a one-to-many socket; 0 is the socket's single or default association
 }
 
-// SCTPRcvInfo exposes SCTP metadata returned by recvmsg ancillary data.
+// SCTPRcvInfo is the per-message receive metadata (struct sctp_rcvinfo),
+// returned by [SCTPConn.ReadFromSCTP] when SCTP_RECVRCVINFO is enabled.
 type SCTPRcvInfo struct {
-	Stream  uint16
-	SSN     uint16
-	Flags   uint16
-	PPID    uint32
-	TSN     uint32
-	CumTSN  uint32
-	Context uint32
-	AssocID int32
-	Next    *SCTPNxtInfo
+	Stream  uint16       // inbound stream number
+	SSN     uint16       // stream sequence number
+	Flags   uint16       // SCTPUnordered if the message was delivered unordered
+	PPID    uint32       // payload protocol identifier, as the sender set it
+	TSN     uint32       // transmission sequence number of the first chunk
+	CumTSN  uint32       // cumulative TSN acknowledged when the message was delivered
+	Context uint32       // the association's SCTP_CONTEXT value
+	AssocID int32        // association the message arrived on
+	Next    *SCTPNxtInfo // the next queued message, when SetRecvNxtInfo is enabled
 }
 
-// SCTPNxtInfo exposes SCTP next-message metadata returned by recvmsg ancillary
-// data when SCTP_RECVNXTINFO is enabled.
+// SCTPNxtInfo describes the message queued after the one just read (struct
+// sctp_nxtinfo), when SCTP_RECVNXTINFO is enabled.
 type SCTPNxtInfo struct {
-	Stream  uint16
-	Flags   uint16
-	PPID    uint32
-	Length  uint32
-	AssocID int32
+	Stream  uint16 // inbound stream number
+	Flags   uint16 // SCTPUnordered and the kernel's SCTP_NEXT_* flags
+	PPID    uint32 // payload protocol identifier
+	Length  uint32 // length of the next message, or of the part received so far
+	AssocID int32  // association the next message belongs to
 }
 
-// SCTPRTOInfo configures SCTP association retransmission timeout parameters.
+// SCTPRTOInfo bounds the retransmission timeout (struct sctp_rtoinfo).
+// Values are in milliseconds; 0 leaves a bound unchanged.
 type SCTPRTOInfo struct {
-	AssocID int32
-	Initial uint32
+	AssocID int32  // association, or 0 for the socket default
+	Initial uint32 // RTO used before any round-trip measurement
 	Max     uint32
 	Min     uint32
 }
 
-// SCTPDelayedSackInfo configures delayed-SACK behavior on a socket or association.
+// SCTPDelayedSackInfo configures delayed acknowledgements (struct
+// sctp_sack_info).
 type SCTPDelayedSackInfo struct {
-	AssocID   int32
-	Delay     uint32
-	Frequency uint32
+	AssocID   int32  // association, or 0 for the socket default
+	Delay     uint32 // SACK delay in milliseconds; 0 leaves it unchanged
+	Frequency uint32 // packets received before a SACK is sent regardless of the delay; 1 disables delaying
 }
 
 // SCTPPRPolicy identifies the partial reliability policy used for SCTP_PR-SCTP.
 type SCTPPRPolicy uint16
 
-// SCTPPRInfo configures default partial-reliability behavior on a socket or association.
+// SCTPPRInfo sets the default partial-reliability policy (struct
+// sctp_default_prinfo) applied to messages sent without one.
 type SCTPPRInfo struct {
-	AssocID int32
-	Value   uint32
-	Policy  SCTPPRPolicy
+	AssocID int32        // association, or 0 for the socket default
+	Value   uint32       // lifetime in milliseconds for SCTPPRTTL, retransmission limit for SCTPPRRTX, priority for SCTPPRPriority
+	Policy  SCTPPRPolicy // SCTPPRNone disables partial reliability
 }
 
-// SCTPAuthKey configures an SCTP AUTH shared key.
+// SCTPAuthKey installs a shared key for SCTP AUTH (struct sctp_authkey).
+// The key is installed with [SCTPConn.SetAuthKey] and selected with
+// [SCTPConn.ActivateAuthKey].
 type SCTPAuthKey struct {
-	AssocID int32
-	KeyID   uint16
-	Secret  []byte
+	AssocID int32  // association, or 0 for the endpoint
+	KeyID   uint16 // key identifier exchanged with the peer
+	Secret  []byte // the key material
 }
 
 // SCTPScheduler identifies an SCTP stream scheduler policy.
 type SCTPScheduler uint16
 
-// SCTPAssocStatus exposes the current status of an SCTP association.
+// SCTPAssocStatus is a snapshot of an association (SCTP_STATUS, struct
+// sctp_status) taken by [SCTPConn.AssocStatus].
 type SCTPAssocStatus struct {
 	AssocID            int32
-	State              int32
-	RWND               uint32
-	UnackedData        uint16
-	PendingData        uint16
-	InStreams          uint16
-	OutStreams         uint16
-	FragmentationPoint uint32
-	PrimaryAddr        SCTPAddr
-	PrimaryState       int32
-	PrimaryCWND        uint32
-	PrimarySRTT        uint32
-	PrimaryRTO         uint32
-	PrimaryMTU         uint32
+	State              int32    // the kernel's association state value (established, shutdown pending, ...); the numbering is platform-specific
+	RWND               uint32   // the peer's current receiver window, in bytes
+	UnackedData        uint16   // DATA chunks sent but not yet acknowledged
+	PendingData        uint16   // DATA chunks queued for sending
+	InStreams          uint16   // inbound streams negotiated
+	OutStreams         uint16   // outbound streams negotiated
+	FragmentationPoint uint32   // largest user-message fragment, in bytes
+	PrimaryAddr        SCTPAddr // the primary path's peer address; zero until a primary path exists
+	PrimaryState       int32    // the kernel's peer-address state value (active, inactive, unconfirmed)
+	PrimaryCWND        uint32   // primary path congestion window, in bytes
+	PrimarySRTT        uint32   // primary path smoothed round-trip time, in milliseconds
+	PrimaryRTO         uint32   // primary path retransmission timeout, in milliseconds
+	PrimaryMTU         uint32   // primary path MTU, in bytes
 }
 
 const (
