@@ -175,6 +175,12 @@ func validateSCTPAddrFamily(network string, a *SCTPAddr) error {
 // DialSCTPMulti acts like [DialSCTP] for multi-address local endpoints.
 // Remote multi-address setup requires connectx-style association setup and
 // is not supported by this v1 API.
+// DialSCTPMulti dials a multi-homed SCTP peer: the association is initiated
+// through the kernel's connectx with every address in raddr and, if laddr
+// lists several addresses, bound to all of them. The kernel sends the INIT
+// to the first remote address and tries the others only when it times out;
+// an address that actively refuses the association makes the dial fail.
+// The connection's RemoteAddr is the first address of raddr.
 func DialSCTPMulti(network string, laddr, raddr *SCTPMultiAddr) (*SCTPConn, error) {
 	return dialSCTPMulti(context.Background(), nil, network, laddr, raddr)
 }
@@ -213,6 +219,10 @@ func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, r
 	} else if assocID != 0 {
 		c.assocID.Store(assocID)
 	}
+	if err := completeSCTPConnectx(ctx, c.fd); err != nil {
+		c.Close()
+		return nil, &OpError{Op: "dial", Net: network, Source: la.opAddr(), Addr: ra.opAddr(), Err: err}
+	}
 	c.setPeerAddrs(copySCTPAddrs(raddr.Addrs))
 	if laddr != nil && len(laddr.Addrs) > 1 {
 		extra := make([]SCTPAddr, len(laddr.Addrs)-1)
@@ -237,12 +247,6 @@ func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, r
 		if base != nil {
 			c.setLocalAddrs([]SCTPAddr{*base})
 		}
-	}
-	if len(raddr.Addrs) > 1 {
-		// Prefer a non-primary destination as the default send target to avoid
-		// getting pinned to an unavailable first address in multi-homed lists.
-		fallback := raddr.Addrs[1]
-		c.fd.raddr = &fallback
 	}
 	return c, nil
 }
@@ -314,6 +318,10 @@ func (c *SCTPConn) LocalAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
+	// Ask the kernel when an association exists; it knows about addresses
+	// the peer added or removed since the dial. Otherwise, or if the query
+	// fails (the association may have just ended), report what this side
+	// configured, which is still the best description of the endpoint.
 	if id := c.assocID.Load(); id != 0 {
 		if addrs, err := localAddrsSCTP(c.fd, id); err == nil && len(addrs) > 0 {
 			c.setLocalAddrs(copySCTPAddrs(addrs))
@@ -334,6 +342,10 @@ func (c *SCTPConn) PeerAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
+	// Ask the kernel when an association exists; it knows about addresses
+	// the peer added or removed since the dial. Otherwise, or if the query
+	// fails (the association may have just ended), report what this side
+	// configured, which is still the best description of the endpoint.
 	if id := c.assocID.Load(); id != 0 {
 		if addrs, err := peerAddrsSCTP(c.fd, id); err == nil && len(addrs) > 0 {
 			c.setPeerAddrs(copySCTPAddrs(addrs))

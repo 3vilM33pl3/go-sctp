@@ -660,6 +660,9 @@ func assocStatusSCTP(c *SCTPConn, assocID int32) (*SCTPAssocStatus, error) {
 	raw := sctpStatusLinux{AssocID: resolved}
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPStatusLinux)
 	if _, err := getSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptStatus, buf); err != nil {
+		// A one-to-many socket whose only association just went away
+		// answers the cached id with EINVAL; the endpoint-level status
+		// (id 0) still describes the socket, so fall back to it once.
 		if assocID == 0 && resolved != 0 && errors.Is(err, syscall.EINVAL) {
 			raw.AssocID = 0
 			if _, retryErr := getSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptStatus, buf); retryErr != nil {
@@ -864,6 +867,11 @@ func marshalSockaddrStorage(family int, addr *SCTPAddr) ([]byte, error) {
 }
 
 func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
+	// An all-zero sockaddr_storage (sa_family AF_UNSPEC) is how SCTP_STATUS
+	// reports an association without a primary address yet.
+	if len(data) < 2 || hostUint16(data) == 0 {
+		return nil, nil
+	}
 	addrs, err := parseRawSockaddrsSCTP(data, 1)
 	if err != nil {
 		return nil, err
