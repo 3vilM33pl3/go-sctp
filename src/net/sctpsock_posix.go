@@ -44,14 +44,18 @@ func (c *SCTPConn) readFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCT
 	var sa syscall.Sockaddr
 	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, 0)
 	if err != nil {
-		return 0, 0, 0, nil, nil, err
+		// readMsg reports a zero-length read on a connected socket as io.EOF.
+		return n, oobn, flags, nil, nil, err
 	}
 	if saAddr := sockaddrToSCTP(sa); saAddr != nil {
 		addr = saAddr.(*SCTPAddr)
 	}
+	if flags&syscall.MSG_CTRUNC != 0 {
+		return n, oobn, flags, addr, nil, errSCTPControlTruncated
+	}
 	info, err = parseSCTPRcvInfo(oob[:oobn])
 	if err != nil {
-		return 0, 0, 0, nil, nil, err
+		return n, oobn, flags, addr, nil, err
 	}
 	return
 }

@@ -9,6 +9,7 @@ package net
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -448,5 +449,40 @@ func TestSCTPNotificationDelivery(t *testing.T) {
 			t.Fatalf("RcvInfo = %+v; want stream 1, ppid 7 (DataIO must enable SCTP_RECVRCVINFO)", info)
 		}
 		sawData = true
+	}
+}
+
+// TestSCTPReadFromEOF checks that a peer shutting the association down is
+// reported as a bare io.EOF from both Read and ReadFromSCTP, like net.Conn
+// implementations do, rather than an *OpError wrapping it.
+func TestSCTPReadFromEOF(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	cli, err := DialSCTP("sctp4", nil, srv.LocalAddr().(*SCTPAddr))
+	if err != nil {
+		srv.Close()
+		t.Fatalf("DialSCTP error: %v", err)
+	}
+	defer cli.Close()
+	if _, err := cli.WriteToSCTP([]byte("bye"), nil, nil); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	buf := make([]byte, 64)
+	readUserMessageSCTP(t, srv, buf)
+	srv.Close()
+
+	if err := cli.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline error: %v", err)
+	}
+	n, _, _, _, _, err := cli.ReadFromSCTP(buf)
+	if n != 0 || err != io.EOF {
+		t.Fatalf("ReadFromSCTP after peer close = %d, %v; want 0, io.EOF", n, err)
+	}
+	if n, err := cli.Read(buf); n != 0 || err != io.EOF {
+		t.Fatalf("Read after peer close = %d, %v; want 0, io.EOF", n, err)
 	}
 }
