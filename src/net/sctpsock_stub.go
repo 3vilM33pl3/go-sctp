@@ -131,3 +131,13 @@ func addSCTPStreams(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported
 func setSCTPStreamScheduler(*SCTPConn, SCTPScheduler) error { return errSCTPUnsupported }
 
 func setSCTPStreamSchedulerValue(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported }
+
+const sctpNotificationsSupported = false
+
+func sctpNotificationType(uint16) SCTPNotificationType { return 0 }
+func sctpAssocState(uint16) SCTPAssocState             { return 0 }
+func sctpPeerAddrState(uint32) SCTPPeerAddrState       { return 0 }
+func sctpSendFailedSent(uint16) bool                   { return false }
+func parseSockaddrStorage([]byte) (*SCTPAddr, error)   { return nil, errSCTPUnsupported }
+
+const sctpPDAPIAssocIDOffset = 12

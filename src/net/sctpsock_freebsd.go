@@ -69,6 +69,61 @@ const (
 	sockaddrStorageSize = 128
 )
 
+const sctpNotificationsSupported = true
+
+// sctp_uio.h notification types.
+func sctpNotificationType(raw uint16) SCTPNotificationType {
+	switch raw {
+	case 0x0001:
+		return SCTPNotifyAssocChange
+	case 0x0002:
+		return SCTPNotifyPeerAddrChange
+	case 0x0003:
+		return SCTPNotifyRemoteError
+	case 0x000e:
+		return SCTPNotifySendFailed
+	case 0x0005:
+		return SCTPNotifyShutdown
+	case 0x0007:
+		return SCTPNotifyPartialDelivery
+	case 0x0006:
+		return SCTPNotifyAdaptation
+	case 0x0008:
+		return SCTPNotifyAuthentication
+	case 0x000a:
+		return SCTPNotifySenderDry
+	case 0x0009:
+		return SCTPNotifyStreamReset
+	case 0x000c:
+		return SCTPNotifyAssocReset
+	case 0x000d:
+		return SCTPNotifyStreamChange
+	}
+	return 0
+}
+
+// FreeBSD numbers association and address states from 1, matching the
+// portable constants.
+func sctpAssocState(raw uint16) SCTPAssocState {
+	if raw >= 1 && raw <= uint16(SCTPCantStartAssoc) {
+		return SCTPAssocState(raw)
+	}
+	return 0
+}
+
+func sctpPeerAddrState(raw uint32) SCTPPeerAddrState {
+	if raw >= 1 && raw <= uint32(SCTPAddrConfirmed) {
+		return SCTPPeerAddrState(raw)
+	}
+	return 0
+}
+
+// SCTP_DATA_UNSENT is 1 and SCTP_DATA_SENT 2 on FreeBSD.
+func sctpSendFailedSent(flags uint16) bool { return flags == 2 }
+
+// struct sctp_pdapi_event: pdapi_assoc_id follows two 16-bit fields.
+const sctpPDAPIAssocIDOffset = 16
+
 type sctpInitMsg struct {
 	NumOStreams    uint16
 	MaxInStreams   uint16
