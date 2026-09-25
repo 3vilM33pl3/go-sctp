@@ -295,6 +295,11 @@ func completeSCTPConnectx(ctx context.Context, fd *netFD) error {
 			continue
 		case 0, syscall.EISCONN:
 			fd.isConnected = true
+			// The kernel picked the local address and port during the
+			// connect when the caller gave none; report what it chose.
+			if lsa, err := syscall.Getsockname(fd.pfd.Sysfd); err == nil {
+				fd.laddr = fd.addrFunc()(lsa)
+			}
 			return nil
 		default:
 			return wrapSyscallError("connectx", errno)
@@ -411,7 +416,7 @@ func marshalSCTPSndInfo(info *SCTPSndInfo) ([]byte, error) {
 
 	si := sctpSndInfo{
 		Stream:  info.Stream,
-		Flags:   info.Flags,
+		Flags:   sctpSndFlagsToKernel(info.Flags),
 		PPID:    info.PPID,
 		Context: info.Context,
 		AssocID: info.AssocID,
@@ -445,7 +450,7 @@ func parseSCTPRcvInfo(oob []byte) (*SCTPRcvInfo, error) {
 			info = &SCTPRcvInfo{
 				Stream:  ri.Stream,
 				SSN:     ri.SSN,
-				Flags:   ri.Flags,
+				Flags:   sctpRcvFlagsFromKernel(ri.Flags),
 				PPID:    ri.PPID,
 				TSN:     ri.TSN,
 				CumTSN:  ri.CumTSN,
@@ -546,7 +551,7 @@ func setSCTPDelayedSack(c *SCTPConn, info SCTPDelayedSackInfo) error {
 func setSCTPDefaultSendInfo(c *SCTPConn, info SCTPSndInfo) error {
 	raw := sctpSndInfo{
 		Stream:  info.Stream,
-		Flags:   info.Flags,
+		Flags:   sctpSndFlagsToKernel(info.Flags),
 		PPID:    info.PPID,
 		Context: info.Context,
 		AssocID: info.AssocID,

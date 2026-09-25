@@ -128,7 +128,7 @@ type SCTPInitOptions struct {
 // SCTPSndInfo is the per-message send metadata (struct sctp_sndinfo).
 type SCTPSndInfo struct {
 	Stream  uint16 // outbound stream number
-	Flags   uint16 // SCTPUnordered and the kernel's other SCTP_* send flags
+	Flags   uint16 // SCTPUnordered, plus platform-specific SCTP_* send flags passed to the kernel unchanged
 	PPID    uint32 // payload protocol identifier, carried opaquely to the receiver
 	Context uint32 // opaque value returned in send-failure notifications
 	AssocID int32  // association, on a one-to-many socket; 0 is the socket's single or default association
@@ -175,7 +175,9 @@ type SCTPDelayedSackInfo struct {
 	Frequency uint32 // packets received before a SACK is sent regardless of the delay; 1 disables delaying
 }
 
-// SCTPPRPolicy identifies the partial reliability policy used for SCTP_PR-SCTP.
+// SCTPPRPolicy identifies a partial-reliability policy (PR-SCTP, RFC 3758 and
+// RFC 7496). The values are portable; each backend maps them to its kernel's
+// numbering.
 type SCTPPRPolicy uint16
 
 // SCTPPRInfo sets the default partial-reliability policy (struct
@@ -218,7 +220,9 @@ type SCTPAssocStatus struct {
 }
 
 const (
-	// SCTPUnordered requests unordered SCTP delivery for a sent message.
+	// SCTPUnordered, in SCTPSndInfo.Flags, requests unordered delivery of the
+	// message; in SCTPRcvInfo.Flags it reports that the message was delivered
+	// unordered. The value is portable across the supported kernels.
 	SCTPUnordered = 1 << 0
 
 	// SCTPPRNone disables partial reliability.

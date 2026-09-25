@@ -133,6 +133,10 @@ func sctpSendFailedSent(flags uint16) bool { return flags == 1 }
 // struct sctp_pdapi_event: pdapi_assoc_id follows the 32-bit indication.
 const sctpPDAPIAssocIDOffset = 12
 
+// The portable send/receive flag values are Linux's own.
+func sctpSndFlagsToKernel(flags uint16) uint16   { return flags }
+func sctpRcvFlagsFromKernel(flags uint16) uint16 { return flags }
+
 type sctpPRInfoLinux struct {
 	AssocID int32
 	Value   uint32
