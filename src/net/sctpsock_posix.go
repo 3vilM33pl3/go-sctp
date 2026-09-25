@@ -102,14 +102,30 @@ func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCT
 	return newSCTPConn(fd), nil
 }
 
+// openSCTP creates the unconnected one-to-one socket DialSCTPMulti (and
+// FreeBSD's DialSCTPInit) connect later. It does not go through
+// internetSocket: in dial mode that rewrites a wildcard remote address on
+// several platforms and dereferences raddr to do so, which crashed here on
+// FreeBSD. fd.dial with a nil remote address only binds laddr and registers
+// the descriptor, which is all that is needed.
 func (sd *sysDialer) openSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	ctrlCtxFn := sd.controlCtxFn()
 	var la sockaddr
 	if laddr != nil {
 		la = laddr
 	}
-	fd, err := internetSocket(ctx, sd.network, la, nil, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP, "dial", ctrlCtxFn)
+	family, ipv6only := favoriteAddrFamily(sd.network, la, nil, "dial")
+	s, err := sysSocket(family, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP)
 	if err != nil {
+		return nil, err
+	}
+	if err := setDefaultSockopts(s, family, syscall.SOCK_STREAM, ipv6only); err != nil {
+		syscall.Close(s)
+		return nil, err
+	}
+	fd := newFD(s, family, syscall.SOCK_STREAM, sd.network)
+	if err := fd.dial(ctx, la, nil, ctrlCtxFn); err != nil {
+		fd.Close()
 		return nil, err
 	}
 	fd.raddr = raddr
