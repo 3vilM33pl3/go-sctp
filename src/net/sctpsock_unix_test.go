@@ -7,6 +7,9 @@
 package net
 
 import (
+	"bytes"
+	"errors"
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -90,5 +93,129 @@ func TestDialSCTPAddrTypes(t *testing.T) {
 	}
 	if len(peers) == 0 || peers[0].Port != saddr.Port {
 		t.Fatalf("PeerAddrs = %v; want the listener port %d", peers, saddr.Port)
+	}
+}
+
+// fdFlags returns the descriptor's F_GETFD and F_GETFL flags.
+func fdFlags(t *testing.T, c *SCTPConn) (fdflags, flflags int) {
+	t.Helper()
+	rc, err := c.SyscallConn()
+	if err != nil {
+		t.Fatalf("SyscallConn error: %v", err)
+	}
+	if err := rc.Control(func(fd uintptr) {
+		r, _, e := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFD, 0)
+		if e != 0 {
+			t.Fatalf("fcntl(F_GETFD) error: %v", e)
+		}
+		fdflags = int(r)
+		r, _, e = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+		if e != 0 {
+			t.Fatalf("fcntl(F_GETFL) error: %v", e)
+		}
+		flflags = int(r)
+	}); err != nil {
+		t.Fatalf("Control error: %v", err)
+	}
+	return fdflags, flflags
+}
+
+// TestSCTPAssocStatusAndPeelOff peels an association off a one-to-many
+// listener and checks the peeled descriptor is a proper net descriptor:
+// non-blocking (so deadlines work), close-on-exec, and reporting SCTP
+// addresses.
+func TestSCTPAssocStatusAndPeelOff(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	if err := srv.SetRecvRcvInfo(true); err != nil {
+		t.Fatalf("SetRecvRcvInfo error: %v", err)
+	}
+	saddr := srv.LocalAddr().(*SCTPAddr)
+
+	cli, err := DialSCTP("sctp4", nil, saddr)
+	if err != nil {
+		t.Fatalf("DialSCTP error: %v", err)
+	}
+	defer cli.Close()
+
+	first := []byte("assoc-status-peeloff")
+	if _, err := cli.WriteToSCTP(first, nil, &SCTPSndInfo{Stream: 2, PPID: 44}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	buf := make([]byte, 256)
+	n, _, info := readUserMessageSCTP(t, srv, buf)
+	if !bytes.Equal(buf[:n], first) {
+		t.Fatalf("server payload = %q; want %q", buf[:n], first)
+	}
+	if info == nil || info.AssocID == 0 {
+		t.Fatalf("server RcvInfo = %+v; want a non-zero association id", info)
+	}
+
+	status, err := srv.AssocStatus(info.AssocID)
+	if err != nil {
+		t.Fatalf("AssocStatus error: %v", err)
+	}
+	if status.AssocID != info.AssocID || status.State == 0 {
+		t.Fatalf("AssocStatus = %+v; want id %d and a non-zero state", status, info.AssocID)
+	}
+	ids, err := srv.AssocIDs()
+	if err != nil {
+		t.Fatalf("AssocIDs error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != info.AssocID {
+		t.Fatalf("AssocIDs = %v; want [%d]", ids, info.AssocID)
+	}
+
+	peeled, err := srv.PeelOff(info.AssocID)
+	if err != nil {
+		t.Fatalf("PeelOff error: %v", err)
+	}
+	defer peeled.Close()
+
+	fdflags, flflags := fdFlags(t, peeled)
+	if fdflags&syscall.FD_CLOEXEC == 0 {
+		t.Errorf("peeled descriptor lacks FD_CLOEXEC (F_GETFD = %#x)", fdflags)
+	}
+	if flflags&syscall.O_NONBLOCK == 0 {
+		t.Errorf("peeled descriptor is blocking (F_GETFL = %#x)", flflags)
+	}
+	if _, ok := peeled.LocalAddr().(*SCTPAddr); !ok {
+		t.Errorf("peeled LocalAddr type = %T; want *SCTPAddr", peeled.LocalAddr())
+	}
+	if ra, ok := peeled.RemoteAddr().(*SCTPAddr); !ok || ra.Port != cli.LocalAddr().(*SCTPAddr).Port {
+		t.Errorf("peeled RemoteAddr = %v; want the client address %v", peeled.RemoteAddr(), cli.LocalAddr())
+	}
+
+	// Nothing is queued on the peeled socket yet, so a read must honour
+	// its deadline instead of blocking in the kernel.
+	if err := peeled.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline error: %v", err)
+	}
+	if _, err := peeled.Read(buf); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Read on idle peeled conn = %v; want deadline exceeded", err)
+	}
+
+	second := []byte("peeled-payload")
+	if _, err := cli.WriteToSCTP(second, nil, &SCTPSndInfo{Stream: 3, PPID: 45}); err != nil {
+		t.Fatalf("second WriteToSCTP error: %v", err)
+	}
+	n, _, info = readUserMessageSCTP(t, peeled, buf)
+	if !bytes.Equal(buf[:n], second) {
+		t.Fatalf("peeled payload = %q; want %q", buf[:n], second)
+	}
+	if info == nil || info.Stream != 3 || info.PPID != 45 {
+		t.Fatalf("peeled RcvInfo = %+v; want stream 3, ppid 45", info)
+	}
+	if _, err := peeled.WriteToSCTP([]byte("reply"), nil, &SCTPSndInfo{Stream: 1}); err != nil {
+		t.Fatalf("peeled WriteToSCTP error: %v", err)
+	}
+	n, _, _ = readUserMessageSCTP(t, cli, buf)
+	if string(buf[:n]) != "reply" {
+		t.Fatalf("client payload = %q; want %q", buf[:n], "reply")
 	}
 }
