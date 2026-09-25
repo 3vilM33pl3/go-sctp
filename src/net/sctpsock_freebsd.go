@@ -374,8 +374,8 @@ func setSCTPMaxSeg(fd *netFD, value uint32) error {
 }
 
 func setSCTPRTOInfo(c *SCTPConn, info SCTPRTOInfo) error {
-	if info.AssocID == 0 && c.assocID != 0 {
-		info.AssocID = c.assocID
+	if info.AssocID == 0 {
+		info.AssocID = c.assocID.Load()
 	}
 	raw := sctpRTOInfoFreeBSD{
 		AssocID: info.AssocID,
@@ -387,8 +387,8 @@ func setSCTPRTOInfo(c *SCTPConn, info SCTPRTOInfo) error {
 }
 
 func setSCTPDelayedSack(c *SCTPConn, info SCTPDelayedSackInfo) error {
-	if info.AssocID == 0 && c.assocID != 0 {
-		info.AssocID = c.assocID
+	if info.AssocID == 0 {
+		info.AssocID = c.assocID.Load()
 	}
 	raw := sctpDelayedSackInfoFreeBSD{
 		AssocID: info.AssocID,
@@ -399,8 +399,8 @@ func setSCTPDelayedSack(c *SCTPConn, info SCTPDelayedSackInfo) error {
 }
 
 func setSCTPDefaultPRInfo(c *SCTPConn, info SCTPPRInfo) error {
-	if info.AssocID == 0 && c.assocID != 0 {
-		info.AssocID = c.assocID
+	if info.AssocID == 0 {
+		info.AssocID = c.assocID.Load()
 	}
 	raw := sctpDefaultPRInfoFreeBSD{
 		Policy:  uint16(info.Policy),
@@ -432,8 +432,8 @@ func setSCTPAuthChunks(fd *netFD, chunks []uint8) error {
 }
 
 func setSCTPAuthKey(c *SCTPConn, key SCTPAuthKey) error {
-	if key.AssocID == 0 && c.assocID != 0 {
-		key.AssocID = c.assocID
+	if key.AssocID == 0 {
+		key.AssocID = c.assocID.Load()
 	}
 	buf := make([]byte, sizeofSCTPAuthKeyHdrFreeBSD+len(key.Secret))
 	hdr := (*sctpAuthKeyHeaderFreeBSD)(unsafe.Pointer(&buf[0]))
@@ -445,16 +445,16 @@ func setSCTPAuthKey(c *SCTPConn, key SCTPAuthKey) error {
 }
 
 func setSCTPActiveAuthKey(c *SCTPConn, assocID int32, keyID uint16) error {
-	if assocID == 0 && c.assocID != 0 {
-		assocID = c.assocID
+	if assocID == 0 {
+		assocID = c.assocID.Load()
 	}
 	raw := sctpAuthKeyIDFreeBSD{AssocID: assocID, KeyID: keyID}
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthActiveKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthKeyIDFreeBSD))
 }
 
 func deleteSCTPAuthKey(c *SCTPConn, assocID int32, keyID uint16) error {
-	if assocID == 0 && c.assocID != 0 {
-		assocID = c.assocID
+	if assocID == 0 {
+		assocID = c.assocID.Load()
 	}
 	raw := sctpAuthKeyIDFreeBSD{AssocID: assocID, KeyID: keyID}
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthDeleteKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthKeyIDFreeBSD))
@@ -895,12 +895,12 @@ func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
 }
 
 func optionalSCTPAssocID(c *SCTPConn) int32 {
-	if c.assocID != 0 {
-		return c.assocID
+	if c.assocID.Load() != 0 {
+		return c.assocID.Load()
 	}
 	ids, err := assocIDsSCTP(c.fd)
 	if err == nil && len(ids) == 1 {
-		c.assocID = ids[0]
+		c.assocID.Store(ids[0])
 		return ids[0]
 	}
 	return 0
@@ -912,17 +912,17 @@ func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
 	}
 	ids, err := assocIDsSCTP(c.fd)
 	if err == nil && len(ids) == 1 {
-		c.assocID = ids[0]
+		c.assocID.Store(ids[0])
 		return ids[0], nil
 	}
-	if c.assocID != 0 {
-		return c.assocID, nil
+	if c.assocID.Load() != 0 {
+		return c.assocID.Load(), nil
 	}
 	if err != nil {
 		return 0, err
 	}
 	if len(ids) == 1 {
-		c.assocID = ids[0]
+		c.assocID.Store(ids[0])
 		return ids[0], nil
 	}
 	if len(ids) == 0 {
@@ -975,9 +975,9 @@ func dialSCTPInitPlatform(ctx context.Context, d *Dialer, network string, laddr,
 	} else {
 		c.fd.raddr = c.fd.addrFunc()(rsa)
 	}
-	c.multiPeer = []SCTPAddr{*raddr}
+	c.setPeerAddrs([]SCTPAddr{*raddr})
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
+		c.setLocalAddrs([]SCTPAddr{*la})
 	}
 	return c, true, nil
 

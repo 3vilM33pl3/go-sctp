@@ -125,12 +125,12 @@ func wrapPeeledSCTPFD(sysfd int, family int, net string, assocID int32) (*SCTPCo
 	}
 	fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
 	conn := newSCTPConn(fd)
-	conn.assocID = assocID
+	conn.assocID.Store(assocID)
 	if la, ok := conn.LocalAddr().(*SCTPAddr); ok && la != nil {
-		conn.multiLocal = []SCTPAddr{*la}
+		conn.setLocalAddrs([]SCTPAddr{*la})
 	}
 	if ra, ok := conn.RemoteAddr().(*SCTPAddr); ok && ra != nil {
-		conn.multiPeer = []SCTPAddr{*ra}
+		conn.setPeerAddrs([]SCTPAddr{*ra})
 	}
 	return conn, nil
 }
