@@ -8,6 +8,8 @@ import (
 	"context"
 	"internal/strconv"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -260,9 +262,43 @@ type SCTPEventMask struct {
 // for SCTP network connections.
 type SCTPConn struct {
 	conn
+
+	// assocID caches the association id learned from the kernel (a
+	// received SCTPRcvInfo, connectx, or a peel-off). Option methods read
+	// it while ReadFromSCTP may be writing it, hence atomic.
+	assocID atomic.Int32
+
+	// addrMu guards the multihoming bookkeeping below, which BindAddrs,
+	// UnbindAddrs, LocalAddrs and PeerAddrs update from any goroutine.
+	addrMu     sync.Mutex
 	multiLocal []SCTPAddr
 	multiPeer  []SCTPAddr
-	assocID    int32
+}
+
+func (c *SCTPConn) setLocalAddrs(addrs []SCTPAddr) {
+	c.addrMu.Lock()
+	c.multiLocal = addrs
+	c.addrMu.Unlock()
+}
+
+func (c *SCTPConn) setPeerAddrs(addrs []SCTPAddr) {
+	c.addrMu.Lock()
+	c.multiPeer = addrs
+	c.addrMu.Unlock()
+}
+
+// localAddrsSnapshot returns a copy of the recorded local addresses.
+func (c *SCTPConn) localAddrsSnapshot() []SCTPAddr {
+	c.addrMu.Lock()
+	defer c.addrMu.Unlock()
+	return copySCTPAddrs(c.multiLocal)
+}
+
+// peerAddrsSnapshot returns a copy of the recorded peer addresses.
+func (c *SCTPConn) peerAddrsSnapshot() []SCTPAddr {
+	c.addrMu.Lock()
+	defer c.addrMu.Unlock()
+	return copySCTPAddrs(c.multiPeer)
 }
 
 func newSCTPConn(fd *netFD) *SCTPConn { return &SCTPConn{conn: conn{fd}} }
@@ -291,8 +327,8 @@ func (c *SCTPConn) ReadFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCT
 		return 0, 0, 0, nil, nil, syscall.EINVAL
 	}
 	n, oobn, flags, addr, info, err = c.readFromSCTP(b)
-	if info != nil && info.AssocID != 0 && c.assocID == 0 {
-		c.assocID = info.AssocID
+	if info != nil && info.AssocID != 0 {
+		c.assocID.CompareAndSwap(0, info.AssocID)
 	}
 	if err != nil {
 		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -524,7 +560,9 @@ func (c *SCTPConn) BindAddrs(addrs []SCTPAddr) error {
 	if err := bindAddrsSCTP(c.fd, addrs); err != nil {
 		return &OpError{Op: "bind", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
+	c.addrMu.Lock()
 	c.multiLocal = mergeUniqueSCTPAddrs(c.multiLocal, addrs)
+	c.addrMu.Unlock()
 	return nil
 }
 
@@ -537,7 +575,9 @@ func (c *SCTPConn) UnbindAddrs(addrs []SCTPAddr) error {
 	if err := unbindAddrsSCTP(c.fd, addrs); err != nil {
 		return &OpError{Op: "bind", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
+	c.addrMu.Lock()
 	c.multiLocal = subtractSCTPAddrs(c.multiLocal, addrs)
+	c.addrMu.Unlock()
 	return nil
 }
 
@@ -732,9 +772,9 @@ func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr 
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
 	}
-	c.multiPeer = []SCTPAddr{*raddr}
+	c.setPeerAddrs([]SCTPAddr{*raddr})
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
+		c.setLocalAddrs([]SCTPAddr{*la})
 	}
 	return c, nil
 }
@@ -784,7 +824,7 @@ func listenSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCT
 		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
 	}
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
+		c.setLocalAddrs([]SCTPAddr{*la})
 	}
 	return c, nil
 }
@@ -804,7 +844,7 @@ func openSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPA
 		return nil, &OpError{Op: "open", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
 	}
 	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
+		c.setLocalAddrs([]SCTPAddr{*la})
 	}
 	return c, nil
 }

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -218,4 +219,77 @@ func TestSCTPAssocStatusAndPeelOff(t *testing.T) {
 	if string(buf[:n]) != "reply" {
 		t.Fatalf("client payload = %q; want %q", buf[:n], "reply")
 	}
+}
+
+// TestSCTPConnConcurrentState drives the association bookkeeping from
+// several goroutines at once. Under -race it catches unsynchronised access
+// to SCTPConn.assocID (written by ReadFromSCTP, read by every option
+// method) and to the multihoming address slices.
+func TestSCTPConnConcurrentState(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	if err := srv.SetRecvRcvInfo(true); err != nil {
+		t.Fatalf("SetRecvRcvInfo error: %v", err)
+	}
+	cli, err := DialSCTP("sctp4", nil, srv.LocalAddr().(*SCTPAddr))
+	if err != nil {
+		t.Fatalf("DialSCTP error: %v", err)
+	}
+	defer cli.Close()
+
+	const msgs = 64
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < msgs; i++ {
+			if _, err := cli.WriteToSCTP([]byte("tick"), nil, &SCTPSndInfo{Stream: uint16(i % 4)}); err != nil {
+				t.Errorf("WriteToSCTP error: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 64)
+		if err := srv.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Errorf("SetReadDeadline error: %v", err)
+			return
+		}
+		for got := 0; got < msgs; {
+			_, _, flags, _, _, err := srv.ReadFromSCTP(buf)
+			if err != nil {
+				t.Errorf("ReadFromSCTP error: %v", err)
+				return
+			}
+			if flags&sctpMsgNotification == 0 {
+				got++
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < msgs; i++ {
+			for _, c := range []*SCTPConn{srv, cli} {
+				if _, err := c.LocalAddrs(); err != nil {
+					t.Errorf("LocalAddrs error: %v", err)
+					return
+				}
+				if _, err := c.PeerAddrs(); err != nil {
+					t.Errorf("PeerAddrs error: %v", err)
+					return
+				}
+				if err := c.SetMaxBurst(4); err != nil {
+					t.Errorf("SetMaxBurst error: %v", err)
+					return
+				}
+			}
+		}
+	}()
+	wg.Wait()
 }
