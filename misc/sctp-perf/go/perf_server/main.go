@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	msgNotification = 0x8000
+	msgNotification = net.SCTPMsgNotification
 
 	frameData   = byte(1)
 	frameStop   = byte(2)

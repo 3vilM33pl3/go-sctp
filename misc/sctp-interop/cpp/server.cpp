@@ -104,6 +104,14 @@ int main(int argc, char** argv) {
   if (listen(fd, 128) < 0) {
     die("listen");
   }
+  // The harness starts servers on port 0 and reads the chosen port here;
+  // flush so it can be read while the server is still running.
+  sockaddr_in bound{};
+  socklen_t bound_len = sizeof(bound);
+  if (getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &bound_len) < 0) {
+    die("getsockname");
+  }
+  std::cout << "CPP_SERVER_LISTEN port=" << ntohs(bound.sin_port) << std::endl;
 
   for (;;) {
     char data[2048]{};

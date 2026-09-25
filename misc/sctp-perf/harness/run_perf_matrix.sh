@@ -46,9 +46,9 @@ fi
 
 echo "building Go perf binaries..."
 (
-  cd "${ROOT}"
-  GOROOT="${ROOT}" "${GO_BIN}" build -trimpath -o "${GO_BUILD_DIR}/perf_server" ./misc/sctp-perf/go/perf_server.go
-  GOROOT="${ROOT}" "${GO_BIN}" build -trimpath -o "${GO_BUILD_DIR}/perf_client" ./misc/sctp-perf/go/perf_client.go
+  cd "${ROOT}/misc" # the perf programs live in the misc module
+  GOROOT="${ROOT}" "${GO_BIN}" build -trimpath -o "${GO_BUILD_DIR}/perf_server" ./sctp-perf/go/perf_server
+  GOROOT="${ROOT}" "${GO_BIN}" build -trimpath -o "${GO_BUILD_DIR}/perf_client" ./sctp-perf/go/perf_client
 )
 
 echo "building C++ perf binaries..."
