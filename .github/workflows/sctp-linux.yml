@@ -2,6 +2,11 @@ name: SCTP Linux
 
 on:
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: "Also run the complete Go test suite (./src/run.bash)"
+        type: boolean
+        default: false
   push:
     branches:
       - master
@@ -16,7 +21,7 @@ jobs:
   sctp-self-hosted:
     name: SCTP self-hosted matrix
     runs-on: [self-hosted, linux, sctp]
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -61,24 +66,69 @@ jobs:
             fi
           fi
 
+      # Go master's cmd/dist needs a bootstrap toolchain of at least Go 1.26.
+      - name: Install bootstrap Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+
       - name: Build Go toolchain
         shell: bash
         run: |
           set -euxo pipefail
+          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
           cd src
           ./make.bash
+          ../bin/go version | grep -q devel
 
       - name: Run SCTP net tests
         shell: bash
         run: |
           set -euxo pipefail
-          GOROOT="$PWD" ./bin/go test net -run '^TestSCTP|TestParseNetworkSCTP|TestResolveSCTPAddrUnknownNetwork' -count=1 -v
+          export GOROOT="$PWD" PATH="$PWD/bin:$PATH"
+          go test net -run 'SCTP|Sctp' -count=1 -v
+          go test net -run 'SCTP|Sctp' -count=1 -race
+          go test net -short -count=1
+
+      - name: Cross-GOOS build and vet
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export GOROOT="$PWD" PATH="$PWD/bin:$PATH"
+          for t in linux/amd64 linux/arm64 linux/s390x freebsd/amd64 freebsd/arm64 darwin/arm64 \
+                   windows/amd64 plan9/amd64 js/wasm wasip1/wasm openbsd/amd64 netbsd/amd64 \
+                   solaris/amd64 aix/ppc64; do
+            GOOS="${t%/*}" GOARCH="${t#*/}" go build std
+            GOOS="${t%/*}" GOARCH="${t#*/}" go vet net
+          done
+          GOOS=freebsd GOARCH=amd64 go test -c -o /dev/null net
+          GOOS=plan9 GOARCH=amd64 go test -c -o /dev/null net
+
+      - name: API, release-note, dependency and format checks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export GOROOT="$PWD" PATH="$PWD/bin:$PATH"
+          go test cmd/api -run Check -check
+          go test cmd/relnote -check
+          go test go/build -run TestDependencies
+          test -z "$(gofmt -l src/net/sctp*.go misc/sctp-interop misc/sctp-perf misc/feature-workbench misc/sctp-feature-client)"
 
       - name: Run Go/C++ interop matrix
         shell: bash
         run: |
           set -euxo pipefail
           INTEROP_LOG_DIR="$PWD/misc/sctp-interop/logs" ./misc/sctp-interop/harness/run_matrix.sh
+
+      - name: Harness module checks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export GOROOT="$PWD" PATH="$PWD/bin:$PATH"
+          cd misc
+          go vet ./sctp-interop/... ./sctp-perf/... ./feature-workbench/... ./sctp-feature-client/...
+          go test ./sctp-feature-client/... ./feature-workbench/...
 
       - name: Upload interop logs
         if: always()
@@ -87,3 +137,31 @@ jobs:
           name: sctp-interop-logs
           path: misc/sctp-interop/logs/
           if-no-files-found: ignore
+
+  full-suite:
+    name: Complete Go test suite
+    if: github.event_name == 'workflow_dispatch' && inputs.full_suite
+    runs-on: [self-hosted, linux, sctp]
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bootstrap Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      - name: Run all.bash
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          # The Go tests build throwaway modules under TMPDIR; a stray .git
+          # above it breaks VCS stamping (see doc/sctp/05-ci-and-ops.md).
+          export TMPDIR="$RUNNER_TEMP/gotmp"
+          mkdir -p "$TMPDIR"
+          cd src
+          ./all.bash
