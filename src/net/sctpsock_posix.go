@@ -8,6 +8,7 @@ package net
 
 import (
 	"context"
+	"os"
 	"syscall"
 )
 
@@ -165,4 +166,39 @@ func (sl *sysListener) openSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn
 		return nil, err
 	}
 	return newSCTPConn(fd), nil
+}
+
+func (ln *SCTPListener) accept() (*SCTPConn, error) {
+	fd, err := ln.fd.accept()
+	if err != nil {
+		return nil, err
+	}
+	c := newSCTPConn(fd)
+	if la, ok := fd.laddr.(*SCTPAddr); ok && la != nil {
+		c.setLocalAddrs([]SCTPAddr{*la})
+	}
+	if ra, ok := fd.raddr.(*SCTPAddr); ok && ra != nil {
+		c.setPeerAddrs([]SCTPAddr{*ra})
+	}
+	return c, nil
+}
+
+func (ln *SCTPListener) close() error { return ln.fd.Close() }
+
+func (ln *SCTPListener) file() (*os.File, error) { return ln.fd.dup() }
+
+// listenSCTPOneToOne opens a one-to-one style (SOCK_STREAM) listening
+// socket, the SCTP counterpart of listenTCP.
+func (sl *sysListener) listenSCTPOneToOne(ctx context.Context, laddr *SCTPAddr) (*SCTPListener, error) {
+	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
+	if sl.ListenConfig.Control != nil {
+		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			return sl.ListenConfig.Control(network, address, c)
+		}
+	}
+	fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP, "listen", ctrlCtxFn)
+	if err != nil {
+		return nil, err
+	}
+	return &SCTPListener{fd: fd, lc: sl.ListenConfig}, nil
 }
