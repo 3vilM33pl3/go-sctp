@@ -894,43 +894,6 @@ func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
 	return nil, nil
 }
 
-func optionalSCTPAssocID(c *SCTPConn) int32 {
-	if c.assocID.Load() != 0 {
-		return c.assocID.Load()
-	}
-	ids, err := assocIDsSCTP(c.fd)
-	if err == nil && len(ids) == 1 {
-		c.assocID.Store(ids[0])
-		return ids[0]
-	}
-	return 0
-}
-
-func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
-	if assocID != 0 {
-		return assocID, nil
-	}
-	ids, err := assocIDsSCTP(c.fd)
-	if err == nil && len(ids) == 1 {
-		c.assocID.Store(ids[0])
-		return ids[0], nil
-	}
-	if c.assocID.Load() != 0 {
-		return c.assocID.Load(), nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	if len(ids) == 1 {
-		c.assocID.Store(ids[0])
-		return ids[0], nil
-	}
-	if len(ids) == 0 {
-		return 0, errors.New("sctp association id is not available yet")
-	}
-	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
-}
-
 // dialSCTPInitPlatform implements DialSCTPInit on FreeBSD: the socket is opened
 // unconnected, SCTP_INITMSG is applied, and only then is connect(2) issued, since
 // FreeBSD rejects INITMSG changes on a connecting one-to-one socket.

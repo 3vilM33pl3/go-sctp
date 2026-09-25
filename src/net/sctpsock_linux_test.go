@@ -403,18 +403,17 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 	if _, err := cli.WriteToSCTP([]byte("control-probe"), nil, &SCTPSndInfo{Stream: 1, PPID: 1}); err != nil {
 		t.Fatalf("WriteToSCTP(control probe) error: %v", err)
 	}
-	ids, err := cli.AssocIDs()
+	// The dialed socket is one-to-one, so the kernel resolves the single
+	// association itself; SCTP_STATUS reports its id.
+	status, err := cli.AssocStatus(0)
 	if err != nil {
-		if errors.Is(err, syscall.ENOPROTOOPT) || errors.Is(err, syscall.EOPNOTSUPP) {
-			t.Skipf("SCTP assoc id listing unavailable: %v", err)
-		}
-		t.Fatalf("AssocIDs error: %v", err)
+		t.Fatalf("AssocStatus error: %v", err)
 	}
-	if len(ids) == 0 {
-		t.Fatal("AssocIDs returned no ids")
+	if status.AssocID == 0 {
+		t.Fatalf("AssocStatus = %+v; want a non-zero association id", status)
 	}
 
-	if err := cli.SetRTOInfo(SCTPRTOInfo{AssocID: ids[0], Initial: 1200, Max: 3000, Min: 600}); err != nil {
+	if err := cli.SetRTOInfo(SCTPRTOInfo{AssocID: status.AssocID, Initial: 1200, Max: 3000, Min: 600}); err != nil {
 		t.Fatalf("SetRTOInfo error: %v", err)
 	}
 	if err := cli.SetDelayedSack(SCTPDelayedSackInfo{Delay: 200, Frequency: 2}); err != nil {
@@ -426,7 +425,9 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 	if err := cli.SetMaxSeg(1200); err != nil {
 		t.Fatalf("SetMaxSeg error: %v", err)
 	}
-	if err := cli.SetAutoClose(5); err != nil {
+	// SCTP_AUTOCLOSE only exists for one-to-many sockets (RFC 6458, 8.1.8);
+	// both kernels reject it on a dialed one-to-one socket.
+	if err := srv.SetAutoClose(5); err != nil {
 		t.Fatalf("SetAutoClose error: %v", err)
 	}
 

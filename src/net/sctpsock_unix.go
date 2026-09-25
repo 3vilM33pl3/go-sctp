@@ -7,6 +7,7 @@
 package net
 
 import (
+	"errors"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -149,4 +150,52 @@ func rawPort(port int) uint16 {
 func portFromRaw(raw uint16) int {
 	p := (*[2]byte)(unsafe.Pointer(&raw))
 	return int(p[0])<<8 | int(p[1])
+}
+
+// resolveSCTPAssocID picks the association an option call applies to: the
+// caller's explicit id, otherwise the socket's single association.
+//
+// One-to-one sockets (dialed connections) carry exactly one association and
+// both kernels ignore the id for them, so the cached value, possibly 0, is
+// returned as is. Linux also rejects SCTP_GET_ASSOC_ID_LIST on them with
+// EOPNOTSUPP, so listing is only attempted on one-to-many sockets.
+func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
+	if assocID != 0 {
+		return assocID, nil
+	}
+	if c.fd.sotype == syscall.SOCK_STREAM {
+		return c.assocID.Load(), nil
+	}
+	ids, err := assocIDsSCTP(c.fd)
+	if err == nil && len(ids) == 1 {
+		c.assocID.Store(ids[0])
+		return ids[0], nil
+	}
+	if id := c.assocID.Load(); id != 0 {
+		return id, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, errors.New("sctp association id is not available yet")
+	}
+	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
+}
+
+// optionalSCTPAssocID is resolveSCTPAssocID for options where 0 is an
+// acceptable answer (the kernel then applies the endpoint default).
+func optionalSCTPAssocID(c *SCTPConn) int32 {
+	if id := c.assocID.Load(); id != 0 {
+		return id
+	}
+	if c.fd.sotype == syscall.SOCK_STREAM {
+		return 0
+	}
+	ids, err := assocIDsSCTP(c.fd)
+	if err == nil && len(ids) == 1 {
+		c.assocID.Store(ids[0])
+		return ids[0]
+	}
+	return 0
 }
