@@ -18,6 +18,15 @@ type SCTPAddr struct {
 	Zone string // IPv6 scoped addressing zone
 }
 
+// isSCTPNetwork reports whether network names one of the SCTP networks.
+func isSCTPNetwork(network string) bool {
+	switch network {
+	case "sctp", "sctp4", "sctp6":
+		return true
+	}
+	return false
+}
+
 // isIPv4 reports whether a binds as an IPv4 socket. A nil or wildcard
 // address counts as IPv4, matching (*TCPAddr).family; it is kept free of
 // syscall constants so untagged code can compare address families on

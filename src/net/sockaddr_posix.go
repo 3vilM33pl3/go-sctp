@@ -36,13 +36,16 @@ type sockaddr interface {
 func (fd *netFD) addrFunc() func(syscall.Sockaddr) Addr {
 	switch fd.family {
 	case syscall.AF_INET, syscall.AF_INET6:
+		// SCTP is dialed one-to-one (SOCK_STREAM) and listened one-to-many
+		// (SOCK_SEQPACKET), so the socket type alone cannot identify it.
+		if isSCTPNetwork(fd.net) {
+			return sockaddrToSCTP
+		}
 		switch fd.sotype {
 		case syscall.SOCK_STREAM:
 			return sockaddrToTCP
 		case syscall.SOCK_DGRAM:
 			return sockaddrToUDP
-		case syscall.SOCK_SEQPACKET:
-			return sockaddrToSCTP
 		case syscall.SOCK_RAW:
 			return sockaddrToIP
 		}
