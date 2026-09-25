@@ -9,28 +9,7 @@ package net
 import (
 	"context"
 	"os"
-	"syscall"
 )
-
-func sockaddrToSCTP(syscall.Sockaddr) Addr { return nil }
-
-func (a *SCTPAddr) family() int {
-	if a.isIPv4() {
-		return syscall.AF_INET
-	}
-	return syscall.AF_INET6
-}
-
-func (a *SCTPAddr) sockaddr(family int) (syscall.Sockaddr, error) {
-	if a == nil {
-		return nil, nil
-	}
-	return ipToSockaddr(family, a.IP, a.Port, a.Zone)
-}
-
-func (a *SCTPAddr) toLocal(net string) sockaddr {
-	return &SCTPAddr{loopbackIP(net), a.Port, a.Zone}
-}
 
 func (c *SCTPConn) readFromSCTP([]byte) (n int, oobn int, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error) {
 	return 0, 0, 0, nil, nil, errSCTPUnsupported

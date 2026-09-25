@@ -12,32 +12,28 @@ import (
 	"syscall"
 )
 
-func sockaddrToSCTP(sa syscall.Sockaddr) Addr {
-	switch sa := sa.(type) {
-	case *syscall.SockaddrInet4:
-		return &SCTPAddr{IP: sa.Addr[0:], Port: sa.Port}
-	case *syscall.SockaddrInet6:
-		return &SCTPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
+// controlCtxFn adapts the Dialer's Control/ControlContext callbacks to the
+// form internetSocket takes, as dialTCP and friends do inline.
+func (sd *sysDialer) controlCtxFn() func(context.Context, string, string, syscall.RawConn) error {
+	if sd.Dialer.ControlContext != nil {
+		return sd.Dialer.ControlContext
+	}
+	if sd.Dialer.Control != nil {
+		return func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			return sd.Dialer.Control(network, address, c)
+		}
 	}
 	return nil
 }
 
-func (a *SCTPAddr) family() int {
-	if a.isIPv4() {
-		return syscall.AF_INET
+// controlCtxFn adapts ListenConfig.Control the same way.
+func (sl *sysListener) controlCtxFn() func(context.Context, string, string, syscall.RawConn) error {
+	if sl.ListenConfig.Control != nil {
+		return func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			return sl.ListenConfig.Control(network, address, c)
+		}
 	}
-	return syscall.AF_INET6
-}
-
-func (a *SCTPAddr) sockaddr(family int) (syscall.Sockaddr, error) {
-	if a == nil {
-		return nil, nil
-	}
-	return ipToSockaddr(family, a.IP, a.Port, a.Zone)
-}
-
-func (a *SCTPAddr) toLocal(net string) sockaddr {
-	return &SCTPAddr{loopbackIP(net), a.Port, a.Zone}
+	return nil
 }
 
 func (c *SCTPConn) readFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error) {
@@ -92,12 +88,7 @@ func (c *SCTPConn) writeToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int
 }
 
 func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
-	ctrlCtxFn := sd.Dialer.ControlContext
-	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
-		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-			return sd.Dialer.Control(network, address, c)
-		}
-	}
+	ctrlCtxFn := sd.controlCtxFn()
 	// Dialed SCTP sockets use one-to-one style semantics so the client side can
 	// interoperate cleanly with remote SCTP stacks over connect(2).
 	var la sockaddr
@@ -112,12 +103,7 @@ func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCT
 }
 
 func (sd *sysDialer) openSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
-	ctrlCtxFn := sd.Dialer.ControlContext
-	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
-		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-			return sd.Dialer.Control(network, address, c)
-		}
-	}
+	ctrlCtxFn := sd.controlCtxFn()
 	var la sockaddr
 	if laddr != nil {
 		la = laddr
@@ -131,12 +117,7 @@ func (sd *sysDialer) openSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCT
 }
 
 func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
-	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
-	if sl.ListenConfig.Control != nil {
-		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-			return sl.ListenConfig.Control(network, address, c)
-		}
-	}
+	ctrlCtxFn := sl.controlCtxFn()
 	fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP, "listen", ctrlCtxFn)
 	if err != nil {
 		return nil, err
@@ -145,12 +126,7 @@ func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPCo
 }
 
 func (sl *sysListener) openSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
-	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
-	if sl.ListenConfig.Control != nil {
-		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-			return sl.ListenConfig.Control(network, address, c)
-		}
-	}
+	ctrlCtxFn := sl.controlCtxFn()
 	family, ipv6only := favoriteAddrFamily(sl.network, laddr, nil, "listen")
 	s, err := sysSocket(family, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP)
 	if err != nil {
@@ -190,12 +166,7 @@ func (ln *SCTPListener) file() (*os.File, error) { return ln.fd.dup() }
 // listenSCTPOneToOne opens a one-to-one style (SOCK_STREAM) listening
 // socket, the SCTP counterpart of listenTCP.
 func (sl *sysListener) listenSCTPOneToOne(ctx context.Context, laddr *SCTPAddr) (*SCTPListener, error) {
-	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
-	if sl.ListenConfig.Control != nil {
-		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-			return sl.ListenConfig.Control(network, address, c)
-		}
-	}
+	ctrlCtxFn := sl.controlCtxFn()
 	fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, syscall.IPPROTO_SCTP, "listen", ctrlCtxFn)
 	if err != nil {
 		return nil, err
