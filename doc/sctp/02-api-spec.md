@@ -1,62 +1,71 @@
 # SCTP API Specification (Current Implementation)
 
-## New Public Types
+The authoritative list is `api/next/99999.txt`; `go doc net.SCTPConn` shows
+the documented surface. This page summarises it.
 
-- `type SCTPAddr struct { IP net.IP; Port int; Zone string }`
-- `type SCTPConn struct`
-- `type SCTPInitOptions struct`
-- `type SCTPSndInfo struct`
-- `type SCTPRcvInfo struct`
-- `type SCTPNxtInfo struct`
-- `type SCTPRTOInfo struct`
-- `type SCTPAssocStatus struct`
-- `type SCTPEventMask struct`
+## Addresses
 
-## New Public Functions
+- `type SCTPAddr struct { IP IP; Port int; Zone string }`, with `Network`,
+  `String`, `AddrPort`; `ResolveSCTPAddr`, `SCTPAddrFromAddrPort`.
+- `type SCTPMultiAddr struct { Addrs []SCTPAddr }`, `ResolveSCTPMultiAddr`.
 
-- `ResolveSCTPAddr(network, address string) (*SCTPAddr, error)`
-- `DialSCTP(network string, laddr, raddr *SCTPAddr) (*SCTPConn, error)`
-- `ListenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error)`
-- `ListenSCTPInit(network string, laddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error)`
-- `SCTPAddrFromAddrPort(addr netip.AddrPort) *SCTPAddr`
+## Connections
 
-## New SCTPConn Methods
+- `DialSCTP`, `DialSCTPInit`, `DialSCTPMulti` → `*SCTPConn` (one-to-one).
+- `ListenSCTP`, `ListenSCTPInit`, `ListenSCTPMulti`, `ListenSCTPMultiInit`,
+  `OpenSCTP` → `*SCTPConn` (one-to-many).
+- `ListenSCTPOneToOne` → `*SCTPListener` with `Accept`, `AcceptSCTP`, `Addr`,
+  `Close`, `SetDeadline`, `File`, `SyscallConn`.
+- `SCTPConn` implements `Conn` and `PacketConn`; `ReadFromSCTP` and
+  `WriteToSCTP` carry `SCTPRcvInfo`/`SCTPSndInfo`. `ReadFromSCTP` returns
+  `io.EOF` unwrapped when the peer shuts the association down and reports a
+  truncated control buffer (`MSG_CTRUNC`) as an error.
 
-- `ReadFromSCTP(b []byte) (n, oobn, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error)`
-- `WriteToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int, error)`
-- `SetNoDelay(bool) error`
-- `SetInitOptions(SCTPInitOptions) error`
-- `SetRTOInfo(SCTPRTOInfo) error`
-- `SetDefaultSendInfo(SCTPSndInfo) error`
-- `SetRecvRcvInfo(bool) error`
-- `SetRecvNxtInfo(bool) error`
-- `SetAutoClose(uint32) error`
-- `SubscribeEvents(SCTPEventMask) error`
-- `BindAddrs([]SCTPAddr) error`
-- `UnbindAddrs([]SCTPAddr) error`
-- `SetPrimaryAddr(*SCTPAddr) error`
-- `SetPeerPrimaryAddr(*SCTPAddr) error`
-- `PeelOff(assocID int32) (*SCTPConn, error)`
-- `AssocIDs() ([]int32, error)`
-- `AssocStatus(assocID int32) (*SCTPAssocStatus, error)`
-- `EnableStreamReset(flags uint16) error`
-- `ResetStreams(flags uint16, streams []uint16) error`
-- `AddStreams(in, out uint16) error`
+## Options (all `SCTPConn` methods)
 
-## Dispatch Integration
+Association setup and defaults: `SetInitOptions`, `SetNoDelay`,
+`SetRTOInfo`, `SetDelayedSack`, `SetDefaultPRInfo`, `SetDefaultSendInfo`,
+`SetMaxBurst`, `SetMaxSeg`, `SetFragmentInterleave`, `SetAutoClose`
+(one-to-many sockets only), `SetRecvRcvInfo`, `SetRecvNxtInfo`.
 
-- `net.Dial`/`DialContext` now accept: `sctp`, `sctp4`, `sctp6`
-- `net.ListenPacket`/`ListenConfig.ListenPacket` now accept: `sctp`, `sctp4`, `sctp6`
+Authentication: `SetAuthChunks`, `SetAuthKey`, `ActivateAuthKey`,
+`DeleteAuthKey`.
 
-## Compatibility Notes
+Multihoming: `BindAddrs`, `UnbindAddrs`, `LocalAddrs`, `PeerAddrs`,
+`SetPrimaryAddr`, `SetPeerPrimaryAddr`.
 
-- Linux and FreeBSD 15/amd64 are supported SCTP platforms.
-- Other non-Linux builds still compile via stubs and return unsupported errors at runtime.
-- `SCTPRcvInfo.Next` is populated when `SetRecvNxtInfo(true)` is enabled and
-  the kernel supplies `SCTP_NXTINFO` ancillary data.
-- Dialed SCTP sockets use Linux `connectx` internally so association-level APIs
-  such as `AssocIDs`, `AssocStatus`, peeloff, primary-address management, and
-  stream reconfiguration can target a live association.
-- On FreeBSD 15, the same exported SCTP API is available, but some association
-  controls still rely on post-association metadata rather than an immediately
-  enumerable assoc-id list on one-to-one sockets.
+Associations: `AssocIDs` (one-to-many sockets), `AssocStatus` (id 0 selects
+the single association of a one-to-one socket), `PeelOff`.
+
+Stream reconfiguration and scheduling: `EnableStreamReset`, `ResetStreams`,
+`AddStreams`, `SetStreamScheduler`, `SetStreamSchedulerValue`.
+
+## Events and notifications
+
+- `SubscribeEvents(SCTPEventMask)`; the mask covers association, address,
+  send failure (`SCTP_SEND_FAILED_EVENT`), peer error, shutdown, partial
+  delivery, adaptation, authentication, sender dry, stream reset,
+  association reset and stream change events, plus `DataIO` for
+  `SCTP_RECVRCVINFO`.
+- `SCTPMsgNotification` is the platform's `MSG_NOTIFICATION` flag;
+  `ParseSCTPNotification([]byte) (*SCTPNotification, error)` decodes the
+  payload with typed bodies `SCTPAssocChange`, `SCTPPeerAddrChange`,
+  `SCTPRemoteError`, `SCTPSendFailed` and `SCTPStreamReset`, and portable
+  `SCTPNotificationType`, `SCTPAssocState` and `SCTPPeerAddrState` values.
+
+## Dispatch integration
+
+- `net.Dial`/`Dialer.DialContext` accept `sctp`, `sctp4`, `sctp6` and return
+  a `*SCTPConn`.
+- `net.Listen`/`ListenConfig.Listen` return a `*SCTPListener`.
+- `net.ListenPacket`/`ListenConfig.ListenPacket` return a one-to-many
+  `*SCTPConn`.
+
+## Platform notes
+
+- Linux (kernel 5.1 or newer for `SCTP_EVENT`/`SCTP_SEND_FAILED_EVENT`) and
+  FreeBSD 13+ on amd64 are supported.
+- Every other platform compiles and returns an error matching
+  `errors.ErrUnsupported`; `SCTPMsgNotification` is 0 there.
+- `AssocIDs` on a one-to-one socket returns `EOPNOTSUPP` on Linux; use
+  `AssocStatus(0)` instead.
