@@ -8,24 +8,14 @@ package net
 
 import (
 	"bytes"
-	"syscall"
 	"testing"
 	"time"
 )
 
-const sctpMsgNotificationFreeBSD = 0x2000
-
-func requireSCTPFreeBSD(t *testing.T) {
-	t.Helper()
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP)
-	if err != nil {
-		t.Skipf("kernel SCTP unavailable: %v", err)
-	}
-	syscall.Close(fd)
-}
+const sctpMsgNotification = 0x2000
 
 func TestSCTPFreeBSDLoopbackReadWrite(t *testing.T) {
-	requireSCTPFreeBSD(t)
+	requireSCTP(t)
 
 	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {
@@ -70,7 +60,7 @@ func TestSCTPFreeBSDLoopbackReadWrite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadFromSCTP error: %v", err)
 		}
-		if flags&sctpMsgNotificationFreeBSD != 0 {
+		if flags&sctpMsgNotification != 0 {
 			continue
 		}
 		if !bytes.Equal(buf[:n], payload) {
@@ -92,7 +82,7 @@ func TestSCTPFreeBSDLoopbackReadWrite(t *testing.T) {
 }
 
 func TestSCTPFreeBSDNotificationDelivery(t *testing.T) {
-	requireSCTPFreeBSD(t)
+	requireSCTP(t)
 
 	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {
@@ -133,7 +123,7 @@ func TestSCTPFreeBSDNotificationDelivery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadFromSCTP error: %v", err)
 		}
-		if flags&sctpMsgNotificationFreeBSD != 0 {
+		if flags&sctpMsgNotification != 0 {
 			sawNotification = true
 			if sawData {
 				break

@@ -18,15 +18,6 @@ import (
 
 const sctpMsgNotification = 0x8000
 
-func requireSCTP(t *testing.T) {
-	t.Helper()
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_SEQPACKET, syscall.IPPROTO_SCTP)
-	if err != nil {
-		t.Skipf("kernel SCTP unavailable: %v", err)
-	}
-	syscall.Close(fd)
-}
-
 func TestSCTPLoopbackReadWrite(t *testing.T) {
 	requireSCTP(t)
 
@@ -622,22 +613,5 @@ func TestSCTPOneToManyMultiAssocIDs(t *testing.T) {
 	slices.Sort(ids)
 	if ids[0] == 0 || ids[1] == 0 || ids[0] == ids[1] {
 		t.Fatalf("AssocIDs=%v; want two distinct non-zero ids", ids)
-	}
-}
-
-func readUserMessageSCTP(t *testing.T, conn *SCTPConn, buf []byte) (int, *SCTPAddr, *SCTPRcvInfo) {
-	t.Helper()
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline error: %v", err)
-	}
-	for {
-		n, _, flags, from, info, err := conn.ReadFromSCTP(buf)
-		if err != nil {
-			t.Fatalf("ReadFromSCTP error: %v", err)
-		}
-		if flags&sctpMsgNotification != 0 {
-			continue
-		}
-		return n, from, info
 	}
 }
