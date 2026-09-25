@@ -124,18 +124,17 @@ func validateSCTPMultiAddr(network string, addrs []SCTPAddr, allowZeroPort bool)
 		return errMissingAddress
 	}
 	var (
-		family int
-		port   int
+		ipv4 bool
+		port int
 	)
 	for i := range addrs {
 		a := &addrs[i]
 		if err := validateSCTPAddrFamily(network, a); err != nil {
 			return err
 		}
-		af := a.family()
 		if i == 0 {
-			family = af
-		} else if af != family {
+			ipv4 = a.isIPv4()
+		} else if a.isIPv4() != ipv4 {
 			return &AddrError{Err: "mixed address family in sctp multi-address", Addr: a.String()}
 		}
 		switch {

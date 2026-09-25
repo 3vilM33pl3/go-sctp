@@ -22,10 +22,7 @@ func sockaddrToSCTP(sa syscall.Sockaddr) Addr {
 }
 
 func (a *SCTPAddr) family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.AF_INET
-	}
-	if a.IP.To4() != nil {
+	if a.isIPv4() {
 		return syscall.AF_INET
 	}
 	return syscall.AF_INET6
@@ -158,11 +155,7 @@ func (sl *sysListener) openSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn
 		syscall.Close(s)
 		return nil, err
 	}
-	fd, err := newFD(s, family, syscall.SOCK_SEQPACKET, sl.network)
-	if err != nil {
-		syscall.Close(s)
-		return nil, err
-	}
+	fd := newFD(s, family, syscall.SOCK_SEQPACKET, sl.network)
 	if err := fd.listenDatagram(ctx, laddr, ctrlCtxFn); err != nil {
 		fd.Close()
 		return nil, err

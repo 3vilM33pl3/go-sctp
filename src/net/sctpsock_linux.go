@@ -7,6 +7,7 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"syscall"
@@ -952,11 +953,7 @@ func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTP
 		syscall.Close(int(sysfd))
 		return nil, wrapSyscallError("getsockopt", err)
 	}
-	fd, err := newFD(int(sysfd), family, sotype, net)
-	if err != nil {
-		syscall.Close(int(sysfd))
-		return nil, err
-	}
+	fd := newFD(int(sysfd), family, sotype, net)
 	if err := fd.init(); err != nil {
 		fd.Close()
 		return nil, err
@@ -979,3 +976,9 @@ func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTP
 func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
 
 func ntohs(v uint16) uint16 { return (v << 8) | (v >> 8) }
+
+// dialSCTPInitPlatform: Linux applies SCTP_INITMSG through the dialer's
+// ControlContext before connect, so the portable path is used.
+func dialSCTPInitPlatform(context.Context, *Dialer, string, *SCTPAddr, *SCTPAddr, SCTPInitOptions) (*SCTPConn, bool, error) {
+	return nil, false, nil
+}
