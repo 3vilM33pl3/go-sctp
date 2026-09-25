@@ -416,7 +416,11 @@ func (c *SCTPConn) SetNoDelay(noDelay bool) error {
 	return nil
 }
 
-// SetInitOptions controls SCTP_INITMSG on the socket.
+// SetInitOptions sets SCTP_INITMSG, the stream counts and INIT retry limits
+// proposed for associations the socket opens or accepts from now on. It also
+// enables SCTP_RECVRCVINFO, so that [SCTPConn.ReadFromSCTP] returns an
+// [SCTPRcvInfo] for every message; use [SCTPConn.SetRecvRcvInfo] to turn that
+// off again.
 func (c *SCTPConn) SetInitOptions(opts SCTPInitOptions) error {
 	if !c.ok() {
 		return syscall.EINVAL
@@ -762,7 +766,9 @@ func DialSCTP(network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	return dialSCTP(context.Background(), nil, network, laddr, raddr)
 }
 
-// DialSCTPInit acts like [DialSCTP] and configures SCTP_INITMSG before connect.
+// DialSCTPInit acts like [DialSCTP] but applies opts (see
+// [SCTPConn.SetInitOptions], including its effect on SCTP_RECVRCVINFO) before
+// the association is initiated, so the INIT chunk carries them.
 func DialSCTPInit(network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
 	return dialSCTPInit(context.Background(), nil, network, laddr, raddr, opts)
 }
@@ -897,7 +903,8 @@ func openSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPA
 	return c, nil
 }
 
-// ListenSCTPInit acts like [ListenSCTP] and configures SCTP_INITMSG on the socket.
+// ListenSCTPInit acts like [ListenSCTP] and applies opts to the socket
+// before it accepts associations; see [SCTPConn.SetInitOptions].
 func ListenSCTPInit(network string, laddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
 	c, err := listenSCTP(context.Background(), ListenConfig{}, network, laddr)
 	if err != nil {

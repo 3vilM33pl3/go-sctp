@@ -129,3 +129,5 @@ func (ln *SCTPListener) file() (*os.File, error)    { return nil, errSCTPUnsuppo
 func (sl *sysListener) listenSCTPOneToOne(context.Context, *SCTPAddr) (*SCTPListener, error) {
 	return nil, errSCTPUnsupported
 }
+
+func completeSCTPConnectx(context.Context, *netFD) error { return errSCTPUnsupported }

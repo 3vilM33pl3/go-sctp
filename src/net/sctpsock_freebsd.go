@@ -845,7 +845,9 @@ func marshalSockaddrStorage(family int, addr *SCTPAddr) ([]byte, error) {
 }
 
 func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
-	if len(data) < 2 {
+	// An all-zero sockaddr_storage (sa_family AF_UNSPEC) is how SCTP_STATUS
+	// reports an association without a primary address yet.
+	if len(data) < 2 || data[1] == 0 {
 		return nil, nil
 	}
 	_, family, _, err := sockaddrSpan(data)

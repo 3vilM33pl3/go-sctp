@@ -7,6 +7,7 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"syscall"
@@ -257,4 +258,57 @@ func subscribeSCTPEvents(fd *netFD, mask SCTPEventMask) error {
 		}
 	}
 	return nil
+}
+
+// completeSCTPConnectx blocks until the association initiated by connectx
+// is established or has failed, the way netFD.connect completes a
+// non-blocking connect(2): wait for the socket to become writable, then read
+// the pending socket error. The kernel sends the INIT to the first address
+// and moves to the others only on timeout; a peer that answers with an
+// ABORT (a reachable address with no endpoint, say) fails the whole attempt,
+// which is reported here rather than on the first write.
+//
+// On success the socket is marked connected: writes must then not name a
+// destination, so the kernel's path management chooses among the confirmed
+// paths, and WriteTo with an address reports ErrWriteToConnected like any
+// connected socket.
+func completeSCTPConnectx(ctx context.Context, fd *netFD) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		fd.pfd.SetWriteDeadline(deadline)
+		defer fd.pfd.SetWriteDeadline(noDeadline)
+	}
+	for {
+		if err := fd.pfd.WaitWrite(); err != nil {
+			return err
+		}
+		var nerr int
+		err := rawSockopt(fd, func(s uintptr) syscall.Errno {
+			var errno syscall.Errno
+			nerr, errno = getsockoptIntSysfd(int(s), syscall.SOL_SOCKET, syscall.SO_ERROR)
+			return errno
+		})
+		if err != nil {
+			return wrapSyscallError("getsockopt", err)
+		}
+		switch errno := syscall.Errno(nerr); errno {
+		case syscall.EINPROGRESS, syscall.EALREADY, syscall.EINTR:
+			continue
+		case 0, syscall.EISCONN:
+			fd.isConnected = true
+			return nil
+		default:
+			return wrapSyscallError("connectx", errno)
+		}
+	}
+}
+
+func getsockoptIntSysfd(s, level, name int) (int, syscall.Errno) {
+	v, err := syscall.GetsockoptInt(s, level, name)
+	if err != nil {
+		if errno, ok := err.(syscall.Errno); ok {
+			return 0, errno
+		}
+		return 0, syscall.EINVAL
+	}
+	return v, 0
 }
