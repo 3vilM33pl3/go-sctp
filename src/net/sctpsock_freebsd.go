@@ -124,6 +124,41 @@ func sctpSendFailedSent(flags uint16) bool { return flags == 2 }
 // struct sctp_pdapi_event: pdapi_assoc_id follows two 16-bit fields.
 const sctpPDAPIAssocIDOffset = 16
 
+// The portable SCTPPRPolicy values are Linux's (0x10, 0x20, 0x30); FreeBSD
+// numbers the policies 1 (TTL), 2 (priority/buffer) and 3 (RTX).
+func sctpPRPolicyToKernel(p SCTPPRPolicy) (uint16, bool) {
+	switch p {
+	case SCTPPRNone:
+		return 0, true
+	case SCTPPRTTL:
+		return 1, true
+	case SCTPPRPriority:
+		return 2, true
+	case SCTPPRRTX:
+		return 3, true
+	}
+	return 0, false
+}
+
+// SCTPUnordered is Linux's SCTP_UNORDERED (1); FreeBSD's is 0x0400. Only
+// that portable bit is translated; other bits are the kernel's own and
+// pass through unchanged.
+const sctpUnorderedFreeBSD = 0x0400
+
+func sctpSndFlagsToKernel(flags uint16) uint16 {
+	if flags&SCTPUnordered != 0 {
+		flags = flags&^SCTPUnordered | sctpUnorderedFreeBSD
+	}
+	return flags
+}
+
+func sctpRcvFlagsFromKernel(flags uint16) uint16 {
+	if flags&sctpUnorderedFreeBSD != 0 {
+		flags = flags&^sctpUnorderedFreeBSD | SCTPUnordered
+	}
+	return flags
+}
+
 type sctpDefaultPRInfoFreeBSD struct {
 	Policy  uint16
 	_       uint16
@@ -181,8 +216,12 @@ func setSCTPDefaultPRInfo(c *SCTPConn, info SCTPPRInfo) error {
 	if info.AssocID == 0 {
 		info.AssocID = c.assocID.Load()
 	}
+	policy, ok := sctpPRPolicyToKernel(info.Policy)
+	if !ok {
+		return syscall.EINVAL
+	}
 	raw := sctpDefaultPRInfoFreeBSD{
-		Policy:  uint16(info.Policy),
+		Policy:  policy,
 		Value:   info.Value,
 		AssocID: info.AssocID,
 	}
@@ -313,12 +352,16 @@ func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	buf := make([]byte, len(b)+4)
-	copy(buf, b)
+	// SCTP_CONNECT_X takes [int32 address count][packed sockaddrs] and
+	// writes the new association id back over the leading count. (Verified
+	// against FreeBSD 15; the kernel rejects other layouts with EINVAL.)
+	buf := make([]byte, 4+len(b))
+	*(*int32)(unsafe.Pointer(&buf[0])) = int32(len(addrs))
+	copy(buf[4:], b)
 	if err := setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptConnectx, buf); err != nil {
 		return 0, err
 	}
-	return *(*int32)(unsafe.Pointer(&buf[len(b)])), nil
+	return *(*int32)(unsafe.Pointer(&buf[0])), nil
 }
 
 func localAddrsSCTP(fd *netFD, assocID int32) ([]SCTPAddr, error) {
@@ -517,7 +560,9 @@ func dialSCTPInitPlatform(ctx context.Context, d *Dialer, network string, laddr,
 		return nil, true, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
 	}
 	c.fd.isConnected = true
-	if lsa != nil {
+	// The kernel picked the local address and port during connect when the
+	// caller gave none; report what it chose.
+	if lsa, err := syscall.Getsockname(c.fd.pfd.Sysfd); err == nil {
 		c.fd.laddr = c.fd.addrFunc()(lsa)
 	}
 	if crsa != nil {

@@ -947,3 +947,41 @@ func TestSCTPIPv6Loopback(t *testing.T) {
 		t.Fatalf("AssocStatus = %+v, %v; want 4 outbound streams from the INIT options", status, err)
 	}
 }
+
+// TestSCTPUnorderedFlag sends an unordered message and checks the receiver
+// sees SCTPUnordered; the flag value differs between the kernels, so this
+// verifies the translation on each.
+func TestSCTPUnorderedFlag(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	if err := srv.SetRecvRcvInfo(true); err != nil {
+		t.Fatal(err)
+	}
+	cli, err := DialSCTP("sctp4", nil, srv.LocalAddr().(*SCTPAddr))
+	if err != nil {
+		t.Fatalf("DialSCTP error: %v", err)
+	}
+	defer cli.Close()
+	if la, ok := cli.LocalAddr().(*SCTPAddr); !ok || la == nil || la.Port == 0 || la.IP.IsUnspecified() {
+		t.Fatalf("dialed LocalAddr = %v; want the bound address", cli.LocalAddr())
+	}
+
+	buf := make([]byte, 64)
+	if _, err := cli.WriteToSCTP([]byte("ordered"), nil, &SCTPSndInfo{Stream: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, info := readUserMessageSCTP(t, srv, buf); info == nil || info.Flags&SCTPUnordered != 0 {
+		t.Fatalf("ordered message RcvInfo = %+v; want SCTPUnordered clear", info)
+	}
+	if _, err := cli.WriteToSCTP([]byte("unordered"), nil, &SCTPSndInfo{Stream: 1, Flags: SCTPUnordered}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, info := readUserMessageSCTP(t, srv, buf); info == nil || info.Flags&SCTPUnordered == 0 {
+		t.Fatalf("unordered message RcvInfo = %+v; want SCTPUnordered set", info)
+	}
+}
