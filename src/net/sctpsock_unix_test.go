@@ -293,3 +293,43 @@ func TestSCTPConnConcurrentState(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+// TestSCTPRawSockaddrPortByteOrder checks that the sockaddr lists handed to
+// bindx/connectx carry the port in network byte order. Both kernels place
+// the port at offset 2 of sockaddr_in and sockaddr_in6 and the address at
+// offset 4 and 8 respectively; the parser used for SCTP_STATUS must read
+// the same bytes back.
+func TestSCTPRawSockaddrPortByteOrder(t *testing.T) {
+	for _, tc := range []struct {
+		family int
+		addr   SCTPAddr
+		ipOff  int
+	}{
+		{syscall.AF_INET, SCTPAddr{IP: IPv4(10, 1, 2, 3), Port: 0x1234}, 4},
+		{syscall.AF_INET6, SCTPAddr{IP: ParseIP("2001:db8::7"), Port: 0xabcd}, 8},
+	} {
+		b, err := marshalRawSockaddrsSCTP(tc.family, []SCTPAddr{tc.addr})
+		if err != nil {
+			t.Fatalf("marshalRawSockaddrsSCTP(%v) error: %v", tc.addr, err)
+		}
+		if b[2] != byte(tc.addr.Port>>8) || b[3] != byte(tc.addr.Port) {
+			t.Errorf("%v: port bytes = %#02x %#02x; want %#04x big-endian", tc.addr, b[2], b[3], tc.addr.Port)
+		}
+		wantIP := tc.addr.IP.To4()
+		if tc.family == syscall.AF_INET6 {
+			wantIP = tc.addr.IP.To16()
+		}
+		if got := b[tc.ipOff : tc.ipOff+len(wantIP)]; !bytes.Equal(got, wantIP) {
+			t.Errorf("%v: address bytes = %v; want %v", tc.addr, got, wantIP)
+		}
+		storage := make([]byte, sockaddrStorageSize)
+		copy(storage, b)
+		got, err := parseSockaddrStorage(storage)
+		if err != nil || got == nil {
+			t.Fatalf("parseSockaddrStorage(%v) = %v, %v", tc.addr, got, err)
+		}
+		if got.Port != tc.addr.Port || !got.IP.Equal(tc.addr.IP) {
+			t.Errorf("round trip of %v = %v", tc.addr, got)
+		}
+	}
+}

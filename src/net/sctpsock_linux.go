@@ -766,7 +766,7 @@ func parseRawSockaddrsSCTP(data []byte, n int) ([]SCTPAddr, error) {
 			copy(unsafe.Slice((*byte)(unsafe.Pointer(&sa)), syscall.SizeofSockaddrInet4), data[:syscall.SizeofSockaddrInet4])
 			ip := make(IP, IPv4len)
 			copy(ip, sa.Addr[:])
-			out = append(out, SCTPAddr{IP: ip, Port: int(ntohs(sa.Port))})
+			out = append(out, SCTPAddr{IP: ip, Port: portFromRaw(sa.Port)})
 			data = data[syscall.SizeofSockaddrInet4:]
 		case syscall.AF_INET6:
 			if len(data) < syscall.SizeofSockaddrInet6 {
@@ -778,7 +778,7 @@ func parseRawSockaddrsSCTP(data []byte, n int) ([]SCTPAddr, error) {
 			copy(ip, sa.Addr[:])
 			out = append(out, SCTPAddr{
 				IP:   ip,
-				Port: int(ntohs(sa.Port)),
+				Port: portFromRaw(sa.Port),
 				Zone: zoneCache.name(int(sa.Scope_id)),
 			})
 			data = data[syscall.SizeofSockaddrInet6:]
@@ -798,12 +798,12 @@ func marshalRawSockaddrsSCTP(family int, addrs []SCTPAddr) ([]byte, error) {
 		}
 		switch sa := sa.(type) {
 		case *syscall.SockaddrInet4:
-			raw := syscall.RawSockaddrInet4{Family: syscall.AF_INET, Port: htons(uint16(sa.Port)), Addr: sa.Addr}
+			raw := syscall.RawSockaddrInet4{Family: syscall.AF_INET, Port: rawPort(sa.Port), Addr: sa.Addr}
 			buf = append(buf, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), syscall.SizeofSockaddrInet4)...)
 		case *syscall.SockaddrInet6:
 			raw := syscall.RawSockaddrInet6{
 				Family:   syscall.AF_INET6,
-				Port:     htons(uint16(sa.Port)),
+				Port:     rawPort(sa.Port),
 				Addr:     sa.Addr,
 				Scope_id: sa.ZoneId,
 			}
@@ -878,10 +878,6 @@ func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
 	}
 	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
 }
-
-func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
-
-func ntohs(v uint16) uint16 { return (v << 8) | (v >> 8) }
 
 // dialSCTPInitPlatform: Linux applies SCTP_INITMSG through the dialer's
 // ControlContext before connect, so the portable path is used.
