@@ -332,42 +332,6 @@ func setSCTPInitOptions(fd *netFD, opts SCTPInitOptions) error {
 	return setSCTPRecvRcvInfo(fd, true)
 }
 
-func setSCTPInitOptionsSockFD(sysfd int, opts SCTPInitOptions) error {
-	sim := sctpInitMsg{
-		NumOStreams:    opts.NumOStreams,
-		MaxInStreams:   opts.MaxInStreams,
-		MaxAttempts:    opts.MaxAttempts,
-		MaxInitTimeout: opts.MaxInitTimeout,
-	}
-	b := unsafe.Slice((*byte)(unsafe.Pointer(&sim)), sizeofSCTPInitMsg)
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS_SETSOCKOPT,
-		uintptr(sysfd),
-		uintptr(syscall.IPPROTO_SCTP),
-		uintptr(sctpSockoptInitMsg),
-		uintptr(unsafe.Pointer(&b[0])),
-		uintptr(len(b)),
-		0,
-	)
-	if errno != 0 {
-		return wrapSyscallError("setsockopt", errno)
-	}
-	one := 1
-	_, _, errno = syscall.Syscall6(
-		syscall.SYS_SETSOCKOPT,
-		uintptr(sysfd),
-		uintptr(syscall.IPPROTO_SCTP),
-		uintptr(sctpSockoptRecvRcvInfo),
-		uintptr(unsafe.Pointer(&one)),
-		uintptr(unsafe.Sizeof(one)),
-		0,
-	)
-	if errno != 0 {
-		return wrapSyscallError("setsockopt", errno)
-	}
-	return nil
-}
-
 func setSCTPRecvRcvInfo(fd *netFD, on bool) error {
 	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptRecvRcvInfo, boolint(on))
 }
@@ -676,55 +640,6 @@ func assocStatusSCTP(c *SCTPConn, assocID int32) (*SCTPAssocStatus, error) {
 	return status, nil
 }
 
-func setSockoptInt(fd *netFD, level, name, value int) error {
-	err := fd.pfd.SetsockoptInt(level, name, value)
-	runtime.KeepAlive(fd)
-	return wrapSyscallError("setsockopt", err)
-}
-
-func setSockoptBytes(fd *netFD, level, name int, value []byte) error {
-	var ptr unsafe.Pointer
-	if len(value) > 0 {
-		ptr = unsafe.Pointer(&value[0])
-	}
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS_SETSOCKOPT,
-		uintptr(fd.pfd.Sysfd),
-		uintptr(level),
-		uintptr(name),
-		uintptr(ptr),
-		uintptr(len(value)),
-		0,
-	)
-	runtime.KeepAlive(fd)
-	if errno != 0 {
-		return wrapSyscallError("setsockopt", errno)
-	}
-	return nil
-}
-
-func getSockoptBytes(fd *netFD, level, name int, value []byte) (int, error) {
-	var ptr unsafe.Pointer
-	if len(value) > 0 {
-		ptr = unsafe.Pointer(&value[0])
-	}
-	size := uint32(len(value))
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT,
-		uintptr(fd.pfd.Sysfd),
-		uintptr(level),
-		uintptr(name),
-		uintptr(ptr),
-		uintptr(unsafe.Pointer(&size)),
-		0,
-	)
-	runtime.KeepAlive(fd)
-	if errno != 0 {
-		return 0, wrapSyscallError("getsockopt", errno)
-	}
-	return int(size), nil
-}
-
 func bindAddrsSCTP(fd *netFD, addrs []SCTPAddr) error {
 	if len(addrs) == 0 {
 		return nil
@@ -755,36 +670,38 @@ func connectAddrsSCTP(fd *netFD, addrs []SCTPAddr) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	r0, _, errno := syscall.Syscall6(
-		syscall.SYS_SETSOCKOPT,
-		uintptr(fd.pfd.Sysfd),
-		uintptr(syscall.IPPROTO_SCTP),
-		uintptr(sctpSockoptConnectx),
-		uintptr(unsafe.Pointer(&b[0])),
-		uintptr(len(b)),
-		0,
+	id, errno, err := connectxSCTP(fd, sctpSockoptConnectx, b)
+	if err != nil {
+		return 0, err
+	}
+	if errno == syscall.ENOPROTOOPT {
+		// Kernels before SCTP_SOCKOPT_CONNECTX only know the _OLD variant.
+		if id, errno, err = connectxSCTP(fd, sctpSockoptConnectxOld, b); err != nil {
+			return 0, err
+		}
+	}
+	switch errno {
+	case 0, syscall.EINPROGRESS, syscall.EALREADY:
+		return id, nil
+	}
+	return 0, wrapSyscallError("setsockopt", errno)
+}
+
+// connectxSCTP issues one SCTP_SOCKOPT_CONNECTX* call and returns the
+// kernel's return value (the association id on success) and errno. The
+// error is non-nil only when the descriptor is already closed.
+func connectxSCTP(fd *netFD, opt int, b []byte) (int32, syscall.Errno, error) {
+	var (
+		r0    uintptr
+		errno syscall.Errno
 	)
+	if err := fd.pfd.RawControl(func(s uintptr) {
+		r0, _, errno = syscall.Syscall6(syscall.SYS_SETSOCKOPT, s, uintptr(syscall.IPPROTO_SCTP), uintptr(opt), uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), 0)
+	}); err != nil {
+		return 0, 0, err
+	}
 	runtime.KeepAlive(fd)
-	if errno == 0 || errno == syscall.EINPROGRESS || errno == syscall.EALREADY {
-		return int32(r0), nil
-	}
-	if errno != syscall.ENOPROTOOPT {
-		return 0, wrapSyscallError("setsockopt", errno)
-	}
-	r0, _, errno = syscall.Syscall6(
-		syscall.SYS_SETSOCKOPT,
-		uintptr(fd.pfd.Sysfd),
-		uintptr(syscall.IPPROTO_SCTP),
-		uintptr(sctpSockoptConnectxOld),
-		uintptr(unsafe.Pointer(&b[0])),
-		uintptr(len(b)),
-		0,
-	)
-	runtime.KeepAlive(fd)
-	if errno != 0 && errno != syscall.EINPROGRESS && errno != syscall.EALREADY {
-		return 0, wrapSyscallError("setsockopt", errno)
-	}
-	return int32(r0), nil
+	return int32(r0), errno, nil
 }
 
 func localAddrsSCTP(fd *netFD, assocID int32) ([]SCTPAddr, error) {
@@ -799,26 +716,14 @@ func getAddrsSCTP(fd *netFD, opt int, assocID int32) ([]SCTPAddr, error) {
 	buf := make([]byte, 64*1024)
 	h := (*sctpGetAddrs)(unsafe.Pointer(&buf[0]))
 	h.AssocID = assocID
-	optLen := uint32(len(buf))
-
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT,
-		uintptr(fd.pfd.Sysfd),
-		uintptr(syscall.IPPROTO_SCTP),
-		uintptr(opt),
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(unsafe.Pointer(&optLen)),
-		0,
-	)
-	runtime.KeepAlive(fd)
-	if errno != 0 {
-		return nil, wrapSyscallError("getsockopt", errno)
+	n, err := getSockoptBytes(fd, syscall.IPPROTO_SCTP, opt, buf)
+	if err != nil {
+		return nil, err
 	}
-	if optLen < uint32(sizeofSCTPGetAddrs) {
+	if n < sizeofSCTPGetAddrs {
 		return nil, errors.New("short SCTP getaddrs response")
 	}
-	h = (*sctpGetAddrs)(unsafe.Pointer(&buf[0]))
-	return parseRawSockaddrsSCTP(buf[sizeofSCTPGetAddrs:optLen], int(h.AddrNum))
+	return parseRawSockaddrsSCTP(buf[sizeofSCTPGetAddrs:n], int(h.AddrNum))
 }
 
 func parseRawSockaddrsSCTP(data []byte, n int) ([]SCTPAddr, error) {
