@@ -73,6 +73,66 @@ const (
 	sockaddrStorageSize = 128
 )
 
+// SCTPMsgNotification is the recvmsg flag, in the flags word returned by
+// [SCTPConn.ReadFromSCTP], marking a message as an SCTP notification rather
+// than user data. It is the platform's MSG_NOTIFICATION.
+const SCTPMsgNotification = 0x8000
+
+const sctpNotificationsSupported = true
+
+// enum sctp_sn_type notification types; the event subscription constants
+// above share the numbering.
+func sctpNotificationType(raw uint16) SCTPNotificationType {
+	switch raw {
+	case 0x8001:
+		return SCTPNotifyAssocChange
+	case 0x8002:
+		return SCTPNotifyPeerAddrChange
+	case 0x8004:
+		return SCTPNotifyRemoteError
+	case 0x8003, 0x800d: // legacy SCTP_SEND_FAILED shares the RFC 6458 header layout
+		return SCTPNotifySendFailed
+	case 0x8005:
+		return SCTPNotifyShutdown
+	case 0x8006:
+		return SCTPNotifyPartialDelivery
+	case 0x8007:
+		return SCTPNotifyAdaptation
+	case 0x8008:
+		return SCTPNotifyAuthentication
+	case 0x8009:
+		return SCTPNotifySenderDry
+	case 0x800a:
+		return SCTPNotifyStreamReset
+	case 0x800b:
+		return SCTPNotifyAssocReset
+	case 0x800c:
+		return SCTPNotifyStreamChange
+	}
+	return 0
+}
+
+// enum sctp_sac_state and enum sctp_spc_state count from 0 on Linux.
+func sctpAssocState(raw uint16) SCTPAssocState {
+	if raw <= uint16(SCTPCantStartAssoc-1) {
+		return SCTPAssocState(raw + 1)
+	}
+	return 0
+}
+
+func sctpPeerAddrState(raw uint32) SCTPPeerAddrState {
+	if raw <= uint32(SCTPAddrPotentiallyFailed-1) {
+		return SCTPPeerAddrState(raw + 1)
+	}
+	return 0
+}
+
+// SCTP_DATA_UNSENT is 0 and SCTP_DATA_SENT 1 on Linux.
+func sctpSendFailedSent(flags uint16) bool { return flags == 1 }
+
+// struct sctp_pdapi_event: pdapi_assoc_id follows the 32-bit indication.
+const sctpPDAPIAssocIDOffset = 12
+
 type sctpInitMsg struct {
 	NumOStreams    uint16
 	MaxInStreams   uint16

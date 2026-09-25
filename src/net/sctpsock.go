@@ -243,6 +243,12 @@ const (
 
 	// SCTPStreamResetOutgoing enables or requests outgoing stream reset support.
 	SCTPStreamResetOutgoing = 0x02
+	// SCTPStreamResetDenied, in an [SCTPStreamReset] notification, reports that
+	// the peer refused the reset.
+	SCTPStreamResetDenied = 0x04
+	// SCTPStreamResetFailed, in an [SCTPStreamReset] notification, reports that
+	// the reset could not be performed.
+	SCTPStreamResetFailed = 0x08
 )
 
 // SCTPEventMask configures SCTP event subscriptions via SCTP_EVENT.
@@ -348,9 +354,10 @@ var errSCTPControlTruncated = errors.New("truncated SCTP control message")
 // [SCTPRcvInfo]; info is nil otherwise.
 //
 // flags is the platform's recvmsg flags word. Compare it with syscall.MSG_EOR
-// to detect the end of a partially delivered message; notifications carry
-// the platform's MSG_NOTIFICATION flag. When the peer has shut down the
-// association, err is [io.EOF].
+// to detect the end of a partially delivered message and with
+// [SCTPMsgNotification] to detect notifications, which decode with
+// [ParseSCTPNotification]. When the peer has shut down the association, err
+// is [io.EOF].
 //
 // If a message arrived but its control data could not be decoded, n and
 // flags still describe the payload and err reports the problem.

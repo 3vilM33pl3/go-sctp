@@ -167,3 +167,126 @@ pkg net, type SCTPSndInfo struct, Context uint32 #99999
 pkg net, type SCTPSndInfo struct, Flags uint16 #99999
 pkg net, type SCTPSndInfo struct, PPID uint32 #99999
 pkg net, type SCTPSndInfo struct, Stream uint16 #99999
+pkg net, const SCTPAddrAdded = 4 #99999
+pkg net, const SCTPAddrAdded SCTPPeerAddrState #99999
+pkg net, const SCTPAddrAvailable = 1 #99999
+pkg net, const SCTPAddrAvailable SCTPPeerAddrState #99999
+pkg net, const SCTPAddrConfirmed = 6 #99999
+pkg net, const SCTPAddrConfirmed SCTPPeerAddrState #99999
+pkg net, const SCTPAddrMadePrimary = 5 #99999
+pkg net, const SCTPAddrMadePrimary SCTPPeerAddrState #99999
+pkg net, const SCTPAddrPotentiallyFailed = 7 #99999
+pkg net, const SCTPAddrPotentiallyFailed SCTPPeerAddrState #99999
+pkg net, const SCTPAddrRemoved = 3 #99999
+pkg net, const SCTPAddrRemoved SCTPPeerAddrState #99999
+pkg net, const SCTPAddrUnreachable = 2 #99999
+pkg net, const SCTPAddrUnreachable SCTPPeerAddrState #99999
+pkg net, const SCTPCantStartAssoc = 5 #99999
+pkg net, const SCTPCantStartAssoc SCTPAssocState #99999
+pkg net, const SCTPCommLost = 2 #99999
+pkg net, const SCTPCommLost SCTPAssocState #99999
+pkg net, const SCTPCommUp = 1 #99999
+pkg net, const SCTPCommUp SCTPAssocState #99999
+pkg net, const SCTPMsgNotification ideal-int #99999
+pkg net, const SCTPNotifyAdaptation = 6 #99999
+pkg net, const SCTPNotifyAdaptation SCTPNotificationType #99999
+pkg net, const SCTPNotifyAssocChange = 1 #99999
+pkg net, const SCTPNotifyAssocChange SCTPNotificationType #99999
+pkg net, const SCTPNotifyAssocReset = 11 #99999
+pkg net, const SCTPNotifyAssocReset SCTPNotificationType #99999
+pkg net, const SCTPNotifyAuthentication = 8 #99999
+pkg net, const SCTPNotifyAuthentication SCTPNotificationType #99999
+pkg net, const SCTPNotifyPartialDelivery = 7 #99999
+pkg net, const SCTPNotifyPartialDelivery SCTPNotificationType #99999
+pkg net, const SCTPNotifyPeerAddrChange = 2 #99999
+pkg net, const SCTPNotifyPeerAddrChange SCTPNotificationType #99999
+pkg net, const SCTPNotifyRemoteError = 3 #99999
+pkg net, const SCTPNotifyRemoteError SCTPNotificationType #99999
+pkg net, const SCTPNotifySenderDry = 10 #99999
+pkg net, const SCTPNotifySenderDry SCTPNotificationType #99999
+pkg net, const SCTPNotifySendFailed = 4 #99999
+pkg net, const SCTPNotifySendFailed SCTPNotificationType #99999
+pkg net, const SCTPNotifyShutdown = 5 #99999
+pkg net, const SCTPNotifyShutdown SCTPNotificationType #99999
+pkg net, const SCTPNotifyStreamChange = 12 #99999
+pkg net, const SCTPNotifyStreamChange SCTPNotificationType #99999
+pkg net, const SCTPNotifyStreamReset = 9 #99999
+pkg net, const SCTPNotifyStreamReset SCTPNotificationType #99999
+pkg net, const SCTPRestart = 3 #99999
+pkg net, const SCTPRestart SCTPAssocState #99999
+pkg net, const SCTPShutdownComp = 4 #99999
+pkg net, const SCTPShutdownComp SCTPAssocState #99999
+pkg net, const SCTPStreamResetDenied = 4 #99999
+pkg net, const SCTPStreamResetDenied ideal-int #99999
+pkg net, const SCTPStreamResetFailed = 8 #99999
+pkg net, const SCTPStreamResetFailed ideal-int #99999
+pkg net (darwin-amd64-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (darwin-amd64), const SCTPMsgNotification = 0 #99999
+pkg net (darwin-arm64-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (darwin-arm64), const SCTPMsgNotification = 0 #99999
+pkg net (freebsd-386-cgo), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-386), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-amd64-cgo), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-amd64), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-arm64-cgo), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-arm64), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-arm-cgo), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-arm), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-riscv64-cgo), const SCTPMsgNotification = 8192 #99999
+pkg net (freebsd-riscv64), const SCTPMsgNotification = 8192 #99999
+pkg net, func ParseSCTPNotification([]uint8) (*SCTPNotification, error) #99999
+pkg net (linux-386-cgo), const SCTPMsgNotification = 32768 #99999
+pkg net (linux-386), const SCTPMsgNotification = 32768 #99999
+pkg net (linux-amd64-cgo), const SCTPMsgNotification = 32768 #99999
+pkg net (linux-amd64), const SCTPMsgNotification = 32768 #99999
+pkg net (linux-arm-cgo), const SCTPMsgNotification = 32768 #99999
+pkg net (linux-arm), const SCTPMsgNotification = 32768 #99999
+pkg net, method (SCTPNotificationType) String() string #99999
+pkg net (netbsd-386-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-386), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-amd64-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-amd64), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-arm64-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-arm64), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-arm-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (netbsd-arm), const SCTPMsgNotification = 0 #99999
+pkg net (openbsd-386-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (openbsd-386), const SCTPMsgNotification = 0 #99999
+pkg net (openbsd-amd64-cgo), const SCTPMsgNotification = 0 #99999
+pkg net (openbsd-amd64), const SCTPMsgNotification = 0 #99999
+pkg net, type SCTPAssocChange struct #99999
+pkg net, type SCTPAssocChange struct, Error uint16 #99999
+pkg net, type SCTPAssocChange struct, InboundStreams uint16 #99999
+pkg net, type SCTPAssocChange struct, Info []uint8 #99999
+pkg net, type SCTPAssocChange struct, OutboundStreams uint16 #99999
+pkg net, type SCTPAssocChange struct, State SCTPAssocState #99999
+pkg net, type SCTPAssocState uint16 #99999
+pkg net, type SCTPNotification struct #99999
+pkg net, type SCTPNotification struct, AssocChange *SCTPAssocChange #99999
+pkg net, type SCTPNotification struct, AssocID int32 #99999
+pkg net, type SCTPNotification struct, Flags uint16 #99999
+pkg net, type SCTPNotification struct, PeerAddrChange *SCTPPeerAddrChange #99999
+pkg net, type SCTPNotification struct, Raw []uint8 #99999
+pkg net, type SCTPNotification struct, RemoteError *SCTPRemoteError #99999
+pkg net, type SCTPNotification struct, SendFailed *SCTPSendFailed #99999
+pkg net, type SCTPNotification struct, StreamReset *SCTPStreamReset #99999
+pkg net, type SCTPNotification struct, Type SCTPNotificationType #99999
+pkg net, type SCTPNotificationType uint16 #99999
+pkg net, type SCTPPeerAddrChange struct #99999
+pkg net, type SCTPPeerAddrChange struct, Addr SCTPAddr #99999
+pkg net, type SCTPPeerAddrChange struct, Error uint32 #99999
+pkg net, type SCTPPeerAddrChange struct, State SCTPPeerAddrState #99999
+pkg net, type SCTPPeerAddrState uint32 #99999
+pkg net, type SCTPRemoteError struct #99999
+pkg net, type SCTPRemoteError struct, Data []uint8 #99999
+pkg net, type SCTPRemoteError struct, Error uint16 #99999
+pkg net, type SCTPSendFailed struct #99999
+pkg net, type SCTPSendFailed struct, Data []uint8 #99999
+pkg net, type SCTPSendFailed struct, Error uint32 #99999
+pkg net, type SCTPSendFailed struct, Info SCTPSndInfo #99999
+pkg net, type SCTPSendFailed struct, Sent bool #99999
+pkg net, type SCTPStreamReset struct #99999
+pkg net, type SCTPStreamReset struct, Flags uint16 #99999
+pkg net, type SCTPStreamReset struct, Streams []uint16 #99999
+pkg net (windows-386), const SCTPMsgNotification = 0 #99999
+pkg net (windows-amd64), const SCTPMsgNotification = 0 #99999

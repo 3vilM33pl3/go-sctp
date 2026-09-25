@@ -12,7 +12,16 @@ import (
 	"time"
 )
 
-const sctpMsgNotification = 0x2000
+const sctpMsgNotification = SCTPMsgNotification
+
+// Raw kernel values for building notification byte layouts in tests.
+var sctpNotifyRaw = sctpNotifyRawValues{
+	assocChange: 0x0001, peerAddrChange: 0x0002, remoteError: 0x0003, sendFailed: 0x000e,
+	shutdown: 0x0005, streamReset: 0x0009,
+	commLost:      2, // SCTP_COMM_LOST
+	addrConfirmed: 6, // SCTP_ADDR_CONFIRMED
+	dataSent:      2, // SCTP_DATA_SENT
+}
 
 func TestSCTPFreeBSDLoopbackReadWrite(t *testing.T) {
 	requireSCTP(t)

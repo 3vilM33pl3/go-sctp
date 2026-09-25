@@ -8,6 +8,7 @@ package net
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -432,14 +433,40 @@ func TestSCTPNotificationDelivery(t *testing.T) {
 		t.Fatalf("SetReadDeadline error: %v", err)
 	}
 	buf := make([]byte, 512)
-	var sawData, sawNotification bool
-	for !(sawData && sawNotification) {
+	var (
+		sawData, sawUp, sawDown bool
+		dataAssoc               int32
+	)
+	for !(sawData && sawUp && sawDown) {
 		n, _, flags, _, info, err := srv.ReadFromSCTP(buf)
 		if err != nil {
-			t.Fatalf("ReadFromSCTP error: %v (data=%v notification=%v)", err, sawData, sawNotification)
+			t.Fatalf("ReadFromSCTP error: %v (data=%v up=%v down=%v)", err, sawData, sawUp, sawDown)
 		}
-		if flags&sctpMsgNotification != 0 {
-			sawNotification = true
+		if flags&SCTPMsgNotification != 0 {
+			nt, err := ParseSCTPNotification(buf[:n])
+			if err != nil {
+				t.Fatalf("ParseSCTPNotification(% x) error: %v", buf[:n], err)
+			}
+			switch nt.Type {
+			case SCTPNotifyAssocChange:
+				switch nt.AssocChange.State {
+				case SCTPCommUp:
+					if nt.AssocChange.OutboundStreams == 0 || nt.AssocChange.InboundStreams == 0 {
+						t.Errorf("COMM_UP with zero streams: %+v", nt.AssocChange)
+					}
+					sawUp = true
+				case SCTPShutdownComp:
+					sawDown = true
+				}
+			case SCTPNotifyShutdown:
+				sawDown = true
+			}
+			if nt.AssocID == 0 {
+				t.Errorf("%v notification without an association id", nt.Type)
+			}
+			if sawData && nt.AssocID != dataAssoc {
+				t.Errorf("%v notification for association %d; data came on %d", nt.Type, nt.AssocID, dataAssoc)
+			}
 			continue
 		}
 		if string(buf[:n]) != "notify-probe" {
@@ -448,8 +475,160 @@ func TestSCTPNotificationDelivery(t *testing.T) {
 		if info == nil || info.Stream != 1 || info.PPID != 7 {
 			t.Fatalf("RcvInfo = %+v; want stream 1, ppid 7 (DataIO must enable SCTP_RECVRCVINFO)", info)
 		}
+		dataAssoc = info.AssocID
 		sawData = true
 	}
+}
+
+// sctpNotifyRawValues holds the kernel's own numbering for the notification
+// layouts built by TestParseSCTPNotificationLayouts; each backend's test
+// file fills it in from its header.
+type sctpNotifyRawValues struct {
+	assocChange, peerAddrChange, remoteError, sendFailed, shutdown, streamReset uint16
+	commLost                                                                    uint16
+	addrConfirmed                                                               uint32
+	dataSent                                                                    uint16
+}
+
+// notifyBytes lays out a notification in host byte order: the sctp_tlv
+// header followed by the fields, with the length filled in.
+func notifyBytes(t *testing.T, typ, flags uint16, fields ...any) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	for _, f := range append([]any{typ, flags, uint32(0)}, fields...) {
+		if b, ok := f.([]byte); ok {
+			buf.Write(b)
+			continue
+		}
+		if err := binary.Write(&buf, binary.NativeEndian, f); err != nil {
+			t.Fatalf("binary.Write(%T) error: %v", f, err)
+		}
+	}
+	out := buf.Bytes()
+	binary.NativeEndian.PutUint32(out[4:], uint32(len(out)))
+	return out
+}
+
+func TestParseSCTPNotificationLayouts(t *testing.T) {
+	raw := sctpNotifyRaw
+
+	t.Run("AssocChange", func(t *testing.T) {
+		b := notifyBytes(t, raw.assocChange, 0, raw.commLost, uint16(0x0d), uint16(5), uint16(7), int32(42), []byte{0xaa, 0xbb, 0xcc, 0xdd})
+		n, err := ParseSCTPNotification(b)
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if n.Type != SCTPNotifyAssocChange || n.AssocID != 42 || n.AssocChange == nil {
+			t.Fatalf("decoded %+v", n)
+		}
+		ac := n.AssocChange
+		if ac.State != SCTPCommLost || ac.Error != 0x0d || ac.OutboundStreams != 5 || ac.InboundStreams != 7 || !bytes.Equal(ac.Info, []byte{0xaa, 0xbb, 0xcc, 0xdd}) {
+			t.Fatalf("AssocChange = %+v", ac)
+		}
+	})
+	t.Run("PeerAddrChange", func(t *testing.T) {
+		sa, err := marshalRawSockaddrsSCTP(syscall.AF_INET, []SCTPAddr{{IP: IPv4(10, 0, 0, 9), Port: 5000}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		storage := make([]byte, sockaddrStorageSize)
+		copy(storage, sa)
+		b := notifyBytes(t, raw.peerAddrChange, 0, storage, raw.addrConfirmed, uint32(0), int32(7))
+		if len(b) != 148 {
+			t.Fatalf("layout is %d bytes; want 148", len(b))
+		}
+		n, err := ParseSCTPNotification(b)
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if n.Type != SCTPNotifyPeerAddrChange || n.AssocID != 7 || n.PeerAddrChange == nil {
+			t.Fatalf("decoded %+v", n)
+		}
+		pc := n.PeerAddrChange
+		if pc.State != SCTPAddrConfirmed || pc.Error != 0 || !pc.Addr.IP.Equal(IPv4(10, 0, 0, 9)) || pc.Addr.Port != 5000 {
+			t.Fatalf("PeerAddrChange = %+v", pc)
+		}
+	})
+	t.Run("RemoteError", func(t *testing.T) {
+		// The cause code is in network byte order (RFC 6458, 6.1.3).
+		b := notifyBytes(t, raw.remoteError, 0, []byte{0x00, 0x0c}, uint16(0), int32(3), []byte{1, 2, 3, 4})
+		n, err := ParseSCTPNotification(b)
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if n.Type != SCTPNotifyRemoteError || n.AssocID != 3 || n.RemoteError == nil || n.RemoteError.Error != 0x0c || !bytes.Equal(n.RemoteError.Data, []byte{1, 2, 3, 4}) {
+			t.Fatalf("decoded %+v / %+v", n, n.RemoteError)
+		}
+	})
+	t.Run("SendFailed", func(t *testing.T) {
+		b := notifyBytes(t, raw.sendFailed, raw.dataSent, uint32(0x20),
+			uint16(4), uint16(SCTPUnordered), uint32(99), uint32(8), int32(11), // sctp_sndinfo
+			int32(11), []byte("hi"))
+		n, err := ParseSCTPNotification(b)
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if n.Type != SCTPNotifySendFailed || n.AssocID != 11 || n.SendFailed == nil {
+			t.Fatalf("decoded %+v", n)
+		}
+		sf := n.SendFailed
+		if !sf.Sent || sf.Error != 0x20 || sf.Info.Stream != 4 || sf.Info.Flags != SCTPUnordered || sf.Info.PPID != 99 || sf.Info.Context != 8 || sf.Info.AssocID != 11 || string(sf.Data) != "hi" {
+			t.Fatalf("SendFailed = %+v", sf)
+		}
+	})
+	t.Run("Shutdown", func(t *testing.T) {
+		n, err := ParseSCTPNotification(notifyBytes(t, raw.shutdown, 0, int32(5)))
+		if err != nil || n.Type != SCTPNotifyShutdown || n.AssocID != 5 {
+			t.Fatalf("decoded %+v, %v", n, err)
+		}
+	})
+	t.Run("StreamReset", func(t *testing.T) {
+		flags := uint16(SCTPStreamResetOutgoing | SCTPStreamResetDenied)
+		n, err := ParseSCTPNotification(notifyBytes(t, raw.streamReset, flags, int32(9), uint16(2), uint16(3)))
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if n.Type != SCTPNotifyStreamReset || n.AssocID != 9 || n.StreamReset == nil || n.StreamReset.Flags != flags || !slicesEqualUint16(n.StreamReset.Streams, []uint16{2, 3}) {
+			t.Fatalf("decoded %+v / %+v", n, n.StreamReset)
+		}
+	})
+	t.Run("Malformed", func(t *testing.T) {
+		if _, err := ParseSCTPNotification(make([]byte, 7)); err == nil {
+			t.Error("7-byte buffer accepted")
+		}
+		b := notifyBytes(t, raw.shutdown, 0, int32(5))
+		binary.NativeEndian.PutUint32(b[4:], 64) // longer than the buffer
+		if _, err := ParseSCTPNotification(b); err == nil {
+			t.Error("over-long length accepted")
+		}
+		binary.NativeEndian.PutUint32(b[4:], 4) // shorter than the header
+		if _, err := ParseSCTPNotification(b); err == nil {
+			t.Error("under-long length accepted")
+		}
+		if _, err := ParseSCTPNotification(notifyBytes(t, raw.assocChange, 0, uint16(1))); err == nil {
+			t.Error("truncated assoc change accepted")
+		}
+	})
+	t.Run("String", func(t *testing.T) {
+		if got := SCTPNotifyShutdown.String(); got != "shutdown" {
+			t.Errorf("SCTPNotifyShutdown.String() = %q", got)
+		}
+		if got := SCTPNotificationType(99).String(); got != "unknown(99)" {
+			t.Errorf("SCTPNotificationType(99).String() = %q", got)
+		}
+	})
+}
+
+func slicesEqualUint16(a, b []uint16) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestSCTPReadFromEOF checks that a peer shutting the association down is

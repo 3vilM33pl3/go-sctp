@@ -16,7 +16,16 @@ import (
 	"unsafe"
 )
 
-const sctpMsgNotification = 0x8000
+const sctpMsgNotification = SCTPMsgNotification
+
+// Raw kernel values for building notification byte layouts in tests.
+var sctpNotifyRaw = sctpNotifyRawValues{
+	assocChange: 0x8001, peerAddrChange: 0x8002, remoteError: 0x8004, sendFailed: 0x800d,
+	shutdown: 0x8005, streamReset: 0x800a,
+	commLost:      1, // SCTP_COMM_LOST (enum sctp_sac_state counts from 0)
+	addrConfirmed: 5, // SCTP_ADDR_CONFIRMED
+	dataSent:      1, // SCTP_DATA_SENT
+}
 
 func TestSCTPLoopbackReadWrite(t *testing.T) {
 	requireSCTP(t)
