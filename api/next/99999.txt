@@ -116,6 +116,7 @@ pkg net, type SCTPDelayedSackInfo struct, Frequency uint32 #99999
 pkg net, type SCTPEventMask struct #99999
 pkg net, type SCTPEventMask struct, Adaptation bool #99999
 pkg net, type SCTPEventMask struct, Address bool #99999
+pkg net, type SCTPEventMask struct, AssocReset bool #99999
 pkg net, type SCTPEventMask struct, Association bool #99999
 pkg net, type SCTPEventMask struct, Authentication bool #99999
 pkg net, type SCTPEventMask struct, DataIO bool #99999
@@ -124,6 +125,7 @@ pkg net, type SCTPEventMask struct, PeerError bool #99999
 pkg net, type SCTPEventMask struct, SenderDry bool #99999
 pkg net, type SCTPEventMask struct, SendFailure bool #99999
 pkg net, type SCTPEventMask struct, Shutdown bool #99999
+pkg net, type SCTPEventMask struct, StreamChange bool #99999
 pkg net, type SCTPEventMask struct, StreamReset bool #99999
 pkg net, type SCTPInitOptions struct #99999
 pkg net, type SCTPInitOptions struct, MaxAttempts uint16 #99999

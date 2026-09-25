@@ -245,17 +245,22 @@ const (
 
 // SCTPEventMask configures SCTP event subscriptions via SCTP_EVENT.
 type SCTPEventMask struct {
-	DataIO          bool
-	Association     bool
-	Address         bool
-	SendFailure     bool
-	PeerError       bool
-	Shutdown        bool
-	PartialDelivery bool
-	Adaptation      bool
-	Authentication  bool
-	SenderDry       bool
-	StreamReset     bool
+	// DataIO requests per-message SCTPRcvInfo ancillary data (SCTP_RECVRCVINFO)
+	// on both kernels; the deprecated sctp_sndrcvinfo event is never enabled.
+	DataIO bool
+
+	Association     bool // SCTP_ASSOC_CHANGE
+	Address         bool // SCTP_PEER_ADDR_CHANGE
+	SendFailure     bool // SCTP_SEND_FAILED_EVENT (RFC 6458 form, carries an SCTPSndInfo)
+	PeerError       bool // SCTP_REMOTE_ERROR
+	Shutdown        bool // SCTP_SHUTDOWN_EVENT
+	PartialDelivery bool // SCTP_PARTIAL_DELIVERY_EVENT
+	Adaptation      bool // SCTP_ADAPTATION_INDICATION
+	Authentication  bool // SCTP_AUTHENTICATION_EVENT
+	SenderDry       bool // SCTP_SENDER_DRY_EVENT
+	StreamReset     bool // SCTP_STREAM_RESET_EVENT
+	AssocReset      bool // SCTP_ASSOC_RESET_EVENT
+	StreamChange    bool // SCTP_STREAM_CHANGE_EVENT
 }
 
 // SCTPConn is an implementation of the [Conn] and [PacketConn] interfaces
@@ -386,7 +391,10 @@ func (c *SCTPConn) SetInitOptions(opts SCTPInitOptions) error {
 	return nil
 }
 
-// SubscribeEvents configures SCTP event subscriptions.
+// SubscribeEvents selects which SCTP notifications the socket delivers.
+// Notifications arrive through [SCTPConn.ReadFromSCTP] with the platform's
+// MSG_NOTIFICATION flag set. Every field is applied, so a false field
+// unsubscribes an event enabled by an earlier call.
 func (c *SCTPConn) SubscribeEvents(mask SCTPEventMask) error {
 	if !c.ok() {
 		return syscall.EINVAL

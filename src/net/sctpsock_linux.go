@@ -55,10 +55,10 @@ const (
 	sctpCmsgTypeRcvInfo = 3
 	sctpCmsgTypeNxtInfo = 4
 
-	sctpEventDataIO          = 0x8000
+	// enum sctp_sn_type; SCTP_SEND_FAILED (0x8003) is the legacy form and
+	// is deliberately not subscribed, see SCTPEventMask.SendFailure.
 	sctpEventAssociation     = 0x8001
 	sctpEventAddress         = 0x8002
-	sctpEventSendFailure     = 0x8003
 	sctpEventPeerError       = 0x8004
 	sctpEventShutdown        = 0x8005
 	sctpEventPartialDelivery = 0x8006
@@ -66,6 +66,9 @@ const (
 	sctpEventAuthentication  = 0x8008
 	sctpEventSenderDry       = 0x8009
 	sctpEventStreamReset     = 0x800a
+	sctpEventAssocReset      = 0x800b
+	sctpEventStreamChange    = 0x800c
+	sctpEventSendFailure     = 0x800d
 
 	sockaddrStorageSize = 128
 )
@@ -177,13 +180,6 @@ type sctpStatusLinux struct {
 	Primary            sctpPeerAddrInfoLinux
 }
 
-type sctpEvent struct {
-	AssocID int32
-	Type    uint16
-	On      uint8
-	_       uint8
-}
-
 type sctpGetAddrs struct {
 	AssocID int32
 	AddrNum uint32
@@ -230,7 +226,6 @@ const (
 	sizeofSCTPStreamValueLinux = int(unsafe.Sizeof(sctpStreamValueLinux{}))
 	sizeofSCTPPrimaryAddrLinux = int(unsafe.Sizeof(sctpPrimaryAddrLinux{}))
 	sizeofSCTPStatusLinux      = int(unsafe.Sizeof(sctpStatusLinux{}))
-	sizeofSCTPEvent            = int(unsafe.Sizeof(sctpEvent{}))
 	sizeofSCTPGetAddrs         = int(unsafe.Sizeof(sctpGetAddrs{}))
 	sizeofSCTPAssocIDsHeader   = int(unsafe.Sizeof(sctpAssocIDsHeader{}))
 	sizeofSCTPPeeloffArg       = int(unsafe.Sizeof(sctpPeeloffArg{}))
@@ -452,32 +447,6 @@ func deleteSCTPAuthKey(c *SCTPConn, assocID int32, keyID uint16) error {
 	}
 	raw := sctpAuthKeyIDLinux{AssocID: assocID, KeyID: keyID}
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthDeleteKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthKeyIDLinux))
-}
-
-func subscribeSCTPEvents(fd *netFD, mask SCTPEventMask) error {
-	events := []struct {
-		typeID uint16
-		on     bool
-	}{
-		{typeID: sctpEventDataIO, on: mask.DataIO},
-		{typeID: sctpEventAssociation, on: mask.Association},
-		{typeID: sctpEventAddress, on: mask.Address},
-		{typeID: sctpEventSendFailure, on: mask.SendFailure},
-		{typeID: sctpEventPeerError, on: mask.PeerError},
-		{typeID: sctpEventShutdown, on: mask.Shutdown},
-		{typeID: sctpEventPartialDelivery, on: mask.PartialDelivery},
-		{typeID: sctpEventAdaptation, on: mask.Adaptation},
-		{typeID: sctpEventAuthentication, on: mask.Authentication},
-		{typeID: sctpEventSenderDry, on: mask.SenderDry},
-		{typeID: sctpEventStreamReset, on: mask.StreamReset},
-	}
-	for _, evt := range events {
-		e := sctpEvent{Type: evt.typeID, On: uint8(boolint(evt.on))}
-		if err := setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptEvent, unsafe.Slice((*byte)(unsafe.Pointer(&e)), sizeofSCTPEvent)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func setSCTPPrimaryAddr(c *SCTPConn, addr *SCTPAddr) error {

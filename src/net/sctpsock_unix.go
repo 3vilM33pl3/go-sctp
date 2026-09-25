@@ -199,3 +199,51 @@ func optionalSCTPAssocID(c *SCTPConn) int32 {
 	}
 	return 0
 }
+
+// sctpEvent is struct sctp_event, the SCTP_EVENT argument on both kernels.
+type sctpEvent struct {
+	AssocID int32
+	Type    uint16
+	On      uint8
+	_       uint8
+}
+
+const sizeofSCTPEvent = int(unsafe.Sizeof(sctpEvent{}))
+
+// subscribeSCTPEvents applies mask through SCTP_EVENT, one call per event
+// type. The deprecated SCTP_EVENTS bitmap is not used: on Linux it (and the
+// SCTP_DATA_IO_EVENT type) would also enable the legacy sctp_sndrcvinfo
+// ancillary data, whose extra cmsg does not fit the receive buffer sized
+// for SCTPRcvInfo, and on FreeBSD its send-failure bit selects the legacy
+// SCTP_SEND_FAILED notification instead of SCTP_SEND_FAILED_EVENT.
+func subscribeSCTPEvents(fd *netFD, mask SCTPEventMask) error {
+	if mask.DataIO {
+		if err := setSCTPRecvRcvInfo(fd, true); err != nil {
+			return err
+		}
+	}
+	events := []struct {
+		typeID uint16
+		on     bool
+	}{
+		{sctpEventAssociation, mask.Association},
+		{sctpEventAddress, mask.Address},
+		{sctpEventSendFailure, mask.SendFailure},
+		{sctpEventPeerError, mask.PeerError},
+		{sctpEventShutdown, mask.Shutdown},
+		{sctpEventPartialDelivery, mask.PartialDelivery},
+		{sctpEventAdaptation, mask.Adaptation},
+		{sctpEventAuthentication, mask.Authentication},
+		{sctpEventSenderDry, mask.SenderDry},
+		{sctpEventStreamReset, mask.StreamReset},
+		{sctpEventAssocReset, mask.AssocReset},
+		{sctpEventStreamChange, mask.StreamChange},
+	}
+	for _, evt := range events {
+		e := sctpEvent{Type: evt.typeID, On: uint8(boolint(evt.on))}
+		if err := setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptEvent, unsafe.Slice((*byte)(unsafe.Pointer(&e)), sizeofSCTPEvent)); err != nil {
+			return err
+		}
+	}
+	return nil
+}

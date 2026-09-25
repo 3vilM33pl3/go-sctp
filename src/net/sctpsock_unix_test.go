@@ -389,3 +389,64 @@ func TestDialSCTPOneToOneAssocOptions(t *testing.T) {
 		})
 	}
 }
+
+// TestSCTPNotificationDelivery subscribes to every event type (the kernel
+// rejects unknown SCTP_EVENT types with EINVAL, so this also checks the
+// constants) and verifies that a peer connecting, sending and closing
+// produces both the data and at least one notification.
+func TestSCTPNotificationDelivery(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	all := SCTPEventMask{
+		DataIO: true, Association: true, Address: true, SendFailure: true,
+		PeerError: true, Shutdown: true, PartialDelivery: true, Adaptation: true,
+		Authentication: true, SenderDry: true, StreamReset: true, AssocReset: true,
+		StreamChange: true,
+	}
+	if err := srv.SubscribeEvents(all); err != nil {
+		t.Fatalf("SubscribeEvents(all) error: %v", err)
+	}
+	if err := srv.SubscribeEvents(SCTPEventMask{DataIO: true, Association: true, Shutdown: true}); err != nil {
+		t.Fatalf("SubscribeEvents error: %v", err)
+	}
+
+	cli, err := DialSCTPInit("sctp4", nil, srv.LocalAddr().(*SCTPAddr), SCTPInitOptions{NumOStreams: 8, MaxInStreams: 8})
+	if err != nil {
+		t.Fatalf("DialSCTPInit error: %v", err)
+	}
+	if err := cli.SetWriteDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetWriteDeadline error: %v", err)
+	}
+	if _, err := cli.WriteToSCTP([]byte("notify-probe"), nil, &SCTPSndInfo{Stream: 1, PPID: 7}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	cli.Close()
+
+	if err := srv.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline error: %v", err)
+	}
+	buf := make([]byte, 512)
+	var sawData, sawNotification bool
+	for !(sawData && sawNotification) {
+		n, _, flags, _, info, err := srv.ReadFromSCTP(buf)
+		if err != nil {
+			t.Fatalf("ReadFromSCTP error: %v (data=%v notification=%v)", err, sawData, sawNotification)
+		}
+		if flags&sctpMsgNotification != 0 {
+			sawNotification = true
+			continue
+		}
+		if string(buf[:n]) != "notify-probe" {
+			t.Fatalf("payload = %q; want notify-probe", buf[:n])
+		}
+		if info == nil || info.Stream != 1 || info.PPID != 7 {
+			t.Fatalf("RcvInfo = %+v; want stream 1, ppid 7 (DataIO must enable SCTP_RECVRCVINFO)", info)
+		}
+		sawData = true
+	}
+}
