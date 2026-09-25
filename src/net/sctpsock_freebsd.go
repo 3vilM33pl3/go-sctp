@@ -786,7 +786,7 @@ func parseRawSockaddrsSCTP(data []byte) ([]SCTPAddr, error) {
 			copy(unsafe.Slice((*byte)(unsafe.Pointer(&sa)), syscall.SizeofSockaddrInet4), data[:syscall.SizeofSockaddrInet4])
 			ip := make(IP, IPv4len)
 			copy(ip, sa.Addr[:])
-			out = append(out, SCTPAddr{IP: ip, Port: int(ntohs(sa.Port))})
+			out = append(out, SCTPAddr{IP: ip, Port: portFromRaw(sa.Port)})
 		case syscall.AF_INET6:
 			var sa syscall.RawSockaddrInet6
 			copy(unsafe.Slice((*byte)(unsafe.Pointer(&sa)), syscall.SizeofSockaddrInet6), data[:syscall.SizeofSockaddrInet6])
@@ -794,7 +794,7 @@ func parseRawSockaddrsSCTP(data []byte) ([]SCTPAddr, error) {
 			copy(ip, sa.Addr[:])
 			out = append(out, SCTPAddr{
 				IP:   ip,
-				Port: int(ntohs(sa.Port)),
+				Port: portFromRaw(sa.Port),
 				Zone: zoneCache.name(int(sa.Scope_id)),
 			})
 		default:
@@ -823,7 +823,7 @@ func marshalRawSockaddrsSCTP(family int, addrs []SCTPAddr) ([]byte, error) {
 			raw := syscall.RawSockaddrInet4{
 				Len:    syscall.SizeofSockaddrInet4,
 				Family: syscall.AF_INET,
-				Port:   htons(uint16(sa.Port)),
+				Port:   rawPort(sa.Port),
 				Addr:   sa.Addr,
 			}
 			buf = append(buf, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), syscall.SizeofSockaddrInet4)...)
@@ -831,7 +831,7 @@ func marshalRawSockaddrsSCTP(family int, addrs []SCTPAddr) ([]byte, error) {
 			raw := syscall.RawSockaddrInet6{
 				Len:      syscall.SizeofSockaddrInet6,
 				Family:   syscall.AF_INET6,
-				Port:     htons(uint16(sa.Port)),
+				Port:     rawPort(sa.Port),
 				Addr:     sa.Addr,
 				Scope_id: sa.ZoneId,
 			}
@@ -876,7 +876,7 @@ func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
 		copy(unsafe.Slice((*byte)(unsafe.Pointer(&sa)), syscall.SizeofSockaddrInet4), data[:syscall.SizeofSockaddrInet4])
 		ip := make(IP, IPv4len)
 		copy(ip, sa.Addr[:])
-		return &SCTPAddr{IP: ip, Port: int(ntohs(sa.Port))}, nil
+		return &SCTPAddr{IP: ip, Port: portFromRaw(sa.Port)}, nil
 	case syscall.AF_INET6:
 		if len(data) < syscall.SizeofSockaddrInet6 {
 			return nil, errors.New("short sockaddr_in6 in SCTP sockaddr_storage")
@@ -887,7 +887,7 @@ func parseSockaddrStorage(data []byte) (*SCTPAddr, error) {
 		copy(ip, sa.Addr[:])
 		return &SCTPAddr{
 			IP:   ip,
-			Port: int(ntohs(sa.Port)),
+			Port: portFromRaw(sa.Port),
 			Zone: zoneCache.name(int(sa.Scope_id)),
 		}, nil
 	}
@@ -930,10 +930,6 @@ func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
 	}
 	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
 }
-
-func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
-
-func ntohs(v uint16) uint16 { return (v << 8) | (v >> 8) }
 
 // dialSCTPInitPlatform implements DialSCTPInit on FreeBSD: the socket is opened
 // unconnected, SCTP_INITMSG is applied, and only then is connect(2) issued, since

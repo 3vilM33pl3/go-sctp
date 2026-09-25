@@ -134,3 +134,19 @@ func wrapPeeledSCTPFD(sysfd int, family int, net string, assocID int32) (*SCTPCo
 	}
 	return conn, nil
 }
+
+// rawPort converts port to the in-memory layout of sin_port/sin6_port,
+// which is network byte order regardless of the host's own. A plain
+// 16-bit swap only happens to work on little-endian machines.
+func rawPort(port int) uint16 {
+	var p [2]byte
+	p[0] = byte(port >> 8)
+	p[1] = byte(port)
+	return *(*uint16)(unsafe.Pointer(&p[0]))
+}
+
+// portFromRaw is the inverse of rawPort.
+func portFromRaw(raw uint16) int {
+	p := (*[2]byte)(unsafe.Pointer(&raw))
+	return int(p[0])<<8 | int(p[1])
+}
