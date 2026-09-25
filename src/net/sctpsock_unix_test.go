@@ -773,3 +773,177 @@ func TestListenSCTPOneToOneErrors(t *testing.T) {
 	}
 	f.Close()
 }
+
+// TestSCTPOptionSetters exercises the option methods that had no coverage,
+// on the socket type each applies to, and checks the errno for the ones the
+// kernel may not support rather than skipping on any error.
+func TestSCTPOptionSetters(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	cli, err := DialSCTP("sctp4", nil, srv.LocalAddr().(*SCTPAddr))
+	if err != nil {
+		t.Fatalf("DialSCTP error: %v", err)
+	}
+	defer cli.Close()
+
+	optional := func(name string, err error) {
+		t.Helper()
+		if err == nil {
+			return
+		}
+		// ENOPROTOOPT/EOPNOTSUPP: the kernel lacks the option or the
+		// feature was not negotiated; EACCES: Linux with
+		// net.sctp.auth_enable=0 refuses the AUTH options.
+		if errors.Is(err, syscall.ENOPROTOOPT) || errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.EACCES) {
+			t.Logf("%s: not enabled on this kernel: %v", name, err)
+			return
+		}
+		t.Errorf("%s error: %v", name, err)
+	}
+
+	// Socket-level defaults on the one-to-many listener.
+	if err := srv.SetFragmentInterleave(1); err != nil {
+		t.Errorf("SetFragmentInterleave error: %v", err)
+	}
+	if err := srv.SetDefaultPRInfo(SCTPPRInfo{Policy: SCTPPRTTL, Value: 500}); err != nil {
+		t.Errorf("SetDefaultPRInfo error: %v", err)
+	}
+	if err := srv.SetDefaultSendInfo(SCTPSndInfo{Stream: 2, PPID: 77}); err != nil {
+		t.Errorf("SetDefaultSendInfo error: %v", err)
+	}
+	if err := srv.SetNoDelay(true); err != nil {
+		t.Errorf("SetNoDelay error: %v", err)
+	}
+	if err := srv.SetRecvNxtInfo(true); err != nil {
+		t.Errorf("SetRecvNxtInfo error: %v", err)
+	}
+	optional("SetStreamScheduler", srv.SetStreamScheduler(SCTPSchedulerRR))
+	optional("SetAuthChunks", srv.SetAuthChunks([]uint8{0x0e}))
+
+	// AUTH keys on the dialed association.
+	if _, err := cli.WriteToSCTP([]byte("probe"), nil, nil); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	readUserMessageSCTP(t, srv, make([]byte, 64))
+	key := SCTPAuthKey{KeyID: 7, Secret: []byte("sixteen-byte-key")}
+	if err := cli.SetAuthKey(key); err != nil {
+		optional("SetAuthKey", err)
+	} else {
+		optional("ActivateAuthKey", cli.ActivateAuthKey(0, 7))
+		optional("DeleteAuthKey", cli.DeleteAuthKey(0, 7))
+	}
+	optional("SetStreamSchedulerValue", cli.SetStreamSchedulerValue(0, 1))
+
+	// Per-association values on the one-to-one socket, without an id.
+	if err := cli.SetDefaultPRInfo(SCTPPRInfo{Policy: SCTPPRRTX, Value: 3}); err != nil {
+		t.Errorf("SetDefaultPRInfo(assoc) error: %v", err)
+	}
+	if err := cli.SetMaxSeg(1200); err != nil {
+		t.Errorf("SetMaxSeg error: %v", err)
+	}
+	if err := cli.SetReadBuffer(1 << 16); err != nil {
+		t.Errorf("SetReadBuffer error: %v", err)
+	}
+	if err := cli.SetWriteBuffer(1 << 16); err != nil {
+		t.Errorf("SetWriteBuffer error: %v", err)
+	}
+	if err := cli.SetAutoClose(1); err == nil {
+		t.Errorf("SetAutoClose on a one-to-one socket succeeded; SCTP_AUTOCLOSE is one-to-many only")
+	}
+}
+
+// TestSCTPPacketConn drives the PacketConn methods on a one-to-many socket
+// pair, including the address checks WriteTo performs.
+func TestSCTPPacketConn(t *testing.T) {
+	requireSCTP(t)
+
+	a, err := ListenPacket("sctp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket error: %v", err)
+	}
+	defer a.Close()
+	b, err := ListenPacket("sctp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket error: %v", err)
+	}
+	defer b.Close()
+	if _, ok := a.(*SCTPConn); !ok {
+		t.Fatalf("ListenPacket(sctp4) returned %T; want *SCTPConn", a)
+	}
+
+	if _, err := a.WriteTo([]byte("x"), &UDPAddr{IP: IPv4(127, 0, 0, 1), Port: 1}); err == nil {
+		t.Error("WriteTo with a *UDPAddr succeeded")
+	}
+	if _, err := a.WriteTo([]byte("to-b"), b.LocalAddr()); err != nil {
+		t.Fatalf("WriteTo error: %v", err)
+	}
+	if err := b.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	for {
+		n, from, err := b.ReadFrom(buf)
+		if err != nil {
+			t.Fatalf("ReadFrom error: %v", err)
+		}
+		if n == 0 || from == nil {
+			continue // a notification would carry no user data
+		}
+		if string(buf[:n]) != "to-b" {
+			t.Fatalf("ReadFrom = %q; want to-b", buf[:n])
+		}
+		if from.(*SCTPAddr).Port != a.LocalAddr().(*SCTPAddr).Port {
+			t.Fatalf("ReadFrom from = %v; want %v", from, a.LocalAddr())
+		}
+		break
+	}
+
+	// An idle read honours its deadline.
+	if err := b.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := b.ReadFrom(buf); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("idle ReadFrom = %v; want deadline exceeded", err)
+	}
+}
+
+// TestSCTPIPv6Loopback runs the basic exchange over sctp6 with DialSCTPInit.
+func TestSCTPIPv6Loopback(t *testing.T) {
+	requireSCTP(t)
+	if !supportsIPv6() {
+		t.Skip("IPv6 is not supported")
+	}
+
+	srv, err := ListenSCTPInit("sctp6", &SCTPAddr{IP: IPv6loopback}, SCTPInitOptions{NumOStreams: 4, MaxInStreams: 4})
+	if err != nil {
+		t.Fatalf("ListenSCTPInit(sctp6) error: %v", err)
+	}
+	defer srv.Close()
+	cli, err := DialSCTPInit("sctp6", nil, srv.LocalAddr().(*SCTPAddr), SCTPInitOptions{NumOStreams: 4, MaxInStreams: 4})
+	if err != nil {
+		t.Fatalf("DialSCTPInit(sctp6) error: %v", err)
+	}
+	defer cli.Close()
+	if la := cli.LocalAddr().(*SCTPAddr); la.IP.To4() != nil {
+		t.Fatalf("sctp6 LocalAddr = %v; want an IPv6 address", la)
+	}
+	if _, err := cli.WriteToSCTP([]byte("v6"), nil, &SCTPSndInfo{Stream: 3, PPID: 6}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	buf := make([]byte, 64)
+	n, from, info := readUserMessageSCTP(t, srv, buf)
+	if string(buf[:n]) != "v6" || from == nil || from.IP.To4() != nil {
+		t.Fatalf("server got %q from %v", buf[:n], from)
+	}
+	if info == nil || info.Stream != 3 || info.PPID != 6 {
+		t.Fatalf("RcvInfo = %+v; want stream 3, ppid 6", info)
+	}
+	if status, err := cli.AssocStatus(0); err != nil || status.OutStreams != 4 {
+		t.Fatalf("AssocStatus = %+v, %v; want 4 outbound streams from the INIT options", status, err)
+	}
+}

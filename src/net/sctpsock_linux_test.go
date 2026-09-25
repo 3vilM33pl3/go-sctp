@@ -119,7 +119,7 @@ func TestSCTPMultiListenLocalAddrs(t *testing.T) {
 	}
 	srv, err := ListenSCTPMulti("sctp4", laddr)
 	if err != nil {
-		t.Skipf("multihome listen unavailable: %v", err)
+		t.Fatalf("ListenSCTPMulti error: %v", err)
 	}
 	defer srv.Close()
 
@@ -152,7 +152,7 @@ func TestDialSCTPMultiRemoteMulti(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("multihome listen unavailable: %v", err)
+		t.Fatalf("ListenSCTPMulti error: %v", err)
 	}
 	defer srv.Close()
 
@@ -168,7 +168,7 @@ func TestDialSCTPMultiRemoteMulti(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("remote multihome dial unavailable: %v", err)
+		t.Fatalf("DialSCTPMulti error: %v", err)
 	}
 	defer cli.Close()
 	if ra, ok := cli.RemoteAddr().(*SCTPAddr); !ok || !ra.IP.Equal(IPv4(127, 0, 0, 1)) {
@@ -211,7 +211,7 @@ func TestDialSCTPMultiPeerAddrs(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("multihome listen unavailable: %v", err)
+		t.Fatalf("ListenSCTPMulti error: %v", err)
 	}
 	defer srv.Close()
 
@@ -227,7 +227,7 @@ func TestDialSCTPMultiPeerAddrs(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("remote multihome dial unavailable: %v", err)
+		t.Fatalf("DialSCTPMulti error: %v", err)
 	}
 	defer cli.Close()
 
@@ -254,7 +254,7 @@ func TestDialSCTPMultiRefusedAddress(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("multihome listen unavailable: %v", err)
+		t.Fatalf("ListenSCTPMulti error: %v", err)
 	}
 	defer srv.Close()
 	sla := srv.LocalAddr().(*SCTPAddr)
@@ -359,7 +359,7 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("multihome listen unavailable: %v", err)
+		t.Fatalf("ListenSCTPMulti error: %v", err)
 	}
 	defer srv.Close()
 
@@ -375,7 +375,7 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Skipf("remote multihome dial unavailable: %v", err)
+		t.Fatalf("DialSCTPMulti error: %v", err)
 	}
 	defer cli.Close()
 
@@ -442,10 +442,12 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 		t.Fatal("LocalAddrs returned no addresses")
 	}
 	if err := cli.SetPeerPrimaryAddr(&laddrs[0]); err != nil {
-		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
-			t.Skipf("peer primary address request requires additional privilege on this kernel: %v", err)
+		// ASCONF is off by default on Linux (net.sctp.addip_enable), which
+		// the kernel reports as EPERM; the rest of the test still applies.
+		if !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EACCES) {
+			t.Fatalf("SetPeerPrimaryAddr error: %v", err)
 		}
-		t.Fatalf("SetPeerPrimaryAddr error: %v", err)
+		t.Logf("SetPeerPrimaryAddr not permitted on this kernel: %v", err)
 	}
 	if err := cli.EnableStreamReset(SCTPStreamResetIncoming | SCTPStreamResetOutgoing); err != nil {
 		if errors.Is(err, syscall.ENOPROTOOPT) || errors.Is(err, syscall.EOPNOTSUPP) {
@@ -453,10 +455,15 @@ func TestSCTPMultiSocketControls(t *testing.T) {
 		}
 		t.Fatalf("EnableStreamReset error: %v", err)
 	}
+	// Reconfiguration must have been negotiated at INIT time, which needs
+	// net.sctp.reconf_enable=1 on both ends; otherwise the kernel answers
+	// ENOPROTOOPT for the requests even though enabling succeeded.
 	if err := cli.ResetStreams(SCTPStreamResetOutgoing, []uint16{1}); err != nil {
-		t.Fatalf("ResetStreams error: %v", err)
-	}
-	if err := cli.AddStreams(1, 1); err != nil {
+		if !errors.Is(err, syscall.ENOPROTOOPT) && !errors.Is(err, syscall.EOPNOTSUPP) {
+			t.Fatalf("ResetStreams error: %v", err)
+		}
+		t.Logf("stream reconfiguration not negotiated on this kernel: %v", err)
+	} else if err := cli.AddStreams(1, 1); err != nil {
 		t.Fatalf("AddStreams error: %v", err)
 	}
 }
