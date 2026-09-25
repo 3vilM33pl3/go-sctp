@@ -8,10 +8,7 @@ package net
 
 import (
 	"context"
-	"errors"
 )
-
-var errSCTPUnsupported = errors.New("sctp is not supported on this platform")
 
 func (c *SCTPConn) readFromSCTP([]byte) (n int, oobn int, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error) {
 	return 0, 0, 0, nil, nil, errSCTPUnsupported
