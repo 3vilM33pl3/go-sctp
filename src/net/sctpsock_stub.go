@@ -8,11 +8,8 @@ package net
 
 import (
 	"context"
-	"errors"
 	"syscall"
 )
-
-var errSCTPUnsupported = errors.New("sctp is not supported on this platform")
 
 func sockaddrToSCTP(syscall.Sockaddr) Addr { return nil }
 

@@ -37,3 +37,13 @@ func TestSCTPAddrString(t *testing.T) {
 		t.Fatalf("SCTPAddr.String() = %q; want %q", got, want)
 	}
 }
+
+func TestSCTPUnsupportedErrorIsErrUnsupported(t *testing.T) {
+	if !errors.Is(errSCTPUnsupported, errors.ErrUnsupported) {
+		t.Fatalf("errors.Is(%v, errors.ErrUnsupported) = false", errSCTPUnsupported)
+	}
+	wrapped := &OpError{Op: "dial", Net: "sctp", Err: errSCTPUnsupported}
+	if !errors.Is(wrapped, errors.ErrUnsupported) {
+		t.Fatalf("errors.Is(%v, errors.ErrUnsupported) = false", wrapped)
+	}
+}

@@ -328,6 +328,15 @@ func (c *SCTPConn) ReadFrom(b []byte) (n int, addr Addr, err error) {
 	return n, saddr, err
 }
 
+// sctpUnsupportedError is returned by every SCTP operation on a platform
+// without an SCTP backend. It matches [errors.ErrUnsupported].
+type sctpUnsupportedError struct{}
+
+func (sctpUnsupportedError) Error() string        { return "sctp is not supported on this platform" }
+func (sctpUnsupportedError) Is(target error) bool { return target == errors.ErrUnsupported }
+
+var errSCTPUnsupported error = sctpUnsupportedError{}
+
 // errSCTPControlTruncated reports that the kernel had more ancillary data
 // than the receive buffer could hold (MSG_CTRUNC), so no metadata is trusted.
 var errSCTPControlTruncated = errors.New("truncated SCTP control message")
