@@ -6,7 +6,6 @@ package net
 
 import (
 	"context"
-	"strings"
 	"syscall"
 )
 
@@ -23,11 +22,15 @@ func (a *SCTPMultiAddr) String() string {
 	if a == nil || len(a.Addrs) == 0 {
 		return "<nil>"
 	}
-	parts := make([]string, 0, len(a.Addrs))
+	// Package net may not depend on strings (see go/build's deps_test).
+	var b []byte
 	for i := range a.Addrs {
-		parts = append(parts, a.Addrs[i].String())
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, a.Addrs[i].String()...)
 	}
-	return strings.Join(parts, ",")
+	return string(b)
 }
 
 func (a *SCTPMultiAddr) copy() *SCTPMultiAddr {
