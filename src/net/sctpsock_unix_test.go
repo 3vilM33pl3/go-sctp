@@ -333,3 +333,59 @@ func TestSCTPRawSockaddrPortByteOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestDialSCTPOneToOneAssocOptions checks that option calls on a dialed
+// (one-to-one) connection work without an explicit association id. Linux
+// answers SCTP_GET_ASSOC_ID_LIST with EOPNOTSUPP on such sockets and
+// connectx reports no id while the connect is in flight, so the resolver
+// must not depend on either.
+func TestDialSCTPOneToOneAssocOptions(t *testing.T) {
+	requireSCTP(t)
+
+	srv, err := ListenSCTP("sctp4", &SCTPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("ListenSCTP error: %v", err)
+	}
+	defer srv.Close()
+	saddr := srv.LocalAddr().(*SCTPAddr)
+
+	for _, dial := range []struct {
+		name string
+		fn   func() (*SCTPConn, error)
+	}{
+		{"DialSCTP", func() (*SCTPConn, error) { return DialSCTP("sctp4", nil, saddr) }},
+		{"DialSCTPMulti", func() (*SCTPConn, error) {
+			return DialSCTPMulti("sctp4", nil, &SCTPMultiAddr{Addrs: []SCTPAddr{*saddr}})
+		}},
+	} {
+		t.Run(dial.name, func(t *testing.T) {
+			cli, err := dial.fn()
+			if err != nil {
+				t.Fatalf("%s error: %v", dial.name, err)
+			}
+			defer cli.Close()
+			if _, err := cli.WriteToSCTP([]byte("probe"), nil, &SCTPSndInfo{Stream: 1}); err != nil {
+				t.Fatalf("WriteToSCTP error: %v", err)
+			}
+			buf := make([]byte, 64)
+			readUserMessageSCTP(t, srv, buf)
+
+			status, err := cli.AssocStatus(0)
+			if err != nil {
+				t.Fatalf("AssocStatus(0) error: %v", err)
+			}
+			if status.AssocID == 0 || status.State == 0 || status.OutStreams == 0 {
+				t.Fatalf("AssocStatus(0) = %+v; want a live association", status)
+			}
+			if err := cli.SetMaxBurst(3); err != nil {
+				t.Fatalf("SetMaxBurst error: %v", err)
+			}
+			if err := cli.SetRTOInfo(SCTPRTOInfo{Initial: 1200, Max: 3000, Min: 600}); err != nil {
+				t.Fatalf("SetRTOInfo error: %v", err)
+			}
+			if err := cli.SetDelayedSack(SCTPDelayedSackInfo{Delay: 200, Frequency: 2}); err != nil {
+				t.Fatalf("SetDelayedSack error: %v", err)
+			}
+		})
+	}
+}
