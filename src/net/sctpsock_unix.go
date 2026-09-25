@@ -136,6 +136,17 @@ func wrapPeeledSCTPFD(sysfd int, family int, net string, assocID int32) (*SCTPCo
 	return conn, nil
 }
 
+// sizeofSCTPSndRcvInfo is struct sctp_sndrcvinfo, the deprecated ancillary
+// data a peer-configured or legacy application may still switch on.
+const sizeofSCTPSndRcvInfo = 32
+
+// sctpOOBBufferSize is the receive control buffer: room for SCTP_RCVINFO,
+// SCTP_NXTINFO and the legacy SCTP_SNDRCV cmsg, so that nothing this package
+// or a raw setsockopt can enable leads to MSG_CTRUNC.
+func sctpOOBBufferSize() int {
+	return syscall.CmsgSpace(sizeofSCTPRcvInfo) + syscall.CmsgSpace(sizeofSCTPNxtInfo) + syscall.CmsgSpace(sizeofSCTPSndRcvInfo)
+}
+
 // rawPort converts port to the in-memory layout of sin_port/sin6_port,
 // which is network byte order regardless of the host's own. A plain
 // 16-bit swap only happens to work on little-endian machines.

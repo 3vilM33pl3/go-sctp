@@ -6,7 +6,9 @@ package net
 
 import (
 	"context"
+	"errors"
 	"internal/strconv"
+	"io"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -326,7 +328,23 @@ func (c *SCTPConn) ReadFrom(b []byte) (n int, addr Addr, err error) {
 	return n, saddr, err
 }
 
-// ReadFromSCTP reads an SCTP message and returns SCTP metadata when available.
+// errSCTPControlTruncated reports that the kernel had more ancillary data
+// than the receive buffer could hold (MSG_CTRUNC), so no metadata is trusted.
+var errSCTPControlTruncated = errors.New("truncated SCTP control message")
+
+// ReadFromSCTP reads one SCTP message into b. It returns the payload length,
+// the length of the ancillary data received, the recvmsg flags word, the
+// sender's address and, when SCTP_RECVRCVINFO is enabled (see
+// [SCTPEventMask.DataIO] and [SCTPConn.SetRecvRcvInfo]), the message's
+// [SCTPRcvInfo]; info is nil otherwise.
+//
+// flags is the platform's recvmsg flags word. Compare it with syscall.MSG_EOR
+// to detect the end of a partially delivered message; notifications carry
+// the platform's MSG_NOTIFICATION flag. When the peer has shut down the
+// association, err is [io.EOF].
+//
+// If a message arrived but its control data could not be decoded, n and
+// flags still describe the payload and err reports the problem.
 func (c *SCTPConn) ReadFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error) {
 	if !c.ok() {
 		return 0, 0, 0, nil, nil, syscall.EINVAL
@@ -335,7 +353,7 @@ func (c *SCTPConn) ReadFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCT
 	if info != nil && info.AssocID != 0 {
 		c.assocID.CompareAndSwap(0, info.AssocID)
 	}
-	if err != nil {
+	if err != nil && err != io.EOF {
 		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
 	return

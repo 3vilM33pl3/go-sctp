@@ -204,6 +204,8 @@ type sctpAddStreamsFreeBSD struct {
 const (
 	sizeofSCTPInitMsg              = int(unsafe.Sizeof(sctpInitMsg{}))
 	sizeofSCTPSndInfoFreeBSD       = int(unsafe.Sizeof(sctpSndInfoFreeBSD{}))
+	sizeofSCTPRcvInfo              = sizeofSCTPRcvInfoFreeBSD
+	sizeofSCTPNxtInfo              = sizeofSCTPNxtInfoFreeBSD
 	sizeofSCTPRcvInfoFreeBSD       = int(unsafe.Sizeof(sctpRcvInfoFreeBSD{}))
 	sizeofSCTPNxtInfoFreeBSD       = int(unsafe.Sizeof(sctpNxtInfoFreeBSD{}))
 	sizeofSCTPRTOInfoFreeBSD       = int(unsafe.Sizeof(sctpRTOInfoFreeBSD{}))
@@ -221,10 +223,6 @@ const (
 	sizeofSCTPResetStreamsHdr      = int(unsafe.Sizeof(sctpResetStreamsHeader{}))
 	sizeofSCTPAddStreamsFreeBSD    = int(unsafe.Sizeof(sctpAddStreamsFreeBSD{}))
 )
-
-func sctpOOBBufferSize() int {
-	return syscall.CmsgSpace(sizeofSCTPRcvInfoFreeBSD) + syscall.CmsgSpace(sizeofSCTPNxtInfoFreeBSD)
-}
 
 func marshalSCTPSndInfo(info *SCTPSndInfo) ([]byte, error) {
 	if info == nil {
