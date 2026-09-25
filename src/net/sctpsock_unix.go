@@ -91,3 +91,46 @@ func setSCTPInitOptionsSockFD(sysfd int, opts SCTPInitOptions) error {
 	}
 	return nil
 }
+
+// wrapPeeledSCTPFD turns a descriptor returned by the platform peel-off
+// primitive into a connected SCTPConn on the netpoller.
+func wrapPeeledSCTPFD(sysfd int, family int, net string, assocID int32) (*SCTPConn, error) {
+	// The netpoller requires a non-blocking descriptor. Setting the flag on
+	// one that already has it is harmless, so every peel-off path funnels
+	// through here rather than trusting what the kernel handed back.
+	if err := syscall.SetNonblock(sysfd, true); err != nil {
+		syscall.Close(sysfd)
+		return nil, wrapSyscallError("setnonblock", err)
+	}
+	sotype, err := syscall.GetsockoptInt(sysfd, syscall.SOL_SOCKET, syscall.SO_TYPE)
+	if err != nil {
+		syscall.Close(sysfd)
+		return nil, wrapSyscallError("getsockopt", err)
+	}
+	fd := newFD(sysfd, family, sotype, net)
+	if err := fd.init(); err != nil {
+		fd.Close()
+		return nil, err
+	}
+	fd.isConnected = true
+	lsa, err := syscall.Getsockname(fd.pfd.Sysfd)
+	if err != nil {
+		fd.Close()
+		return nil, wrapSyscallError("getsockname", err)
+	}
+	rsa, err := syscall.Getpeername(fd.pfd.Sysfd)
+	if err != nil {
+		fd.Close()
+		return nil, wrapSyscallError("getpeername", err)
+	}
+	fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
+	conn := newSCTPConn(fd)
+	conn.assocID = assocID
+	if la, ok := conn.LocalAddr().(*SCTPAddr); ok && la != nil {
+		conn.multiLocal = []SCTPAddr{*la}
+	}
+	if ra, ok := conn.RemoteAddr().(*SCTPAddr); ok && ra != nil {
+		conn.multiPeer = []SCTPAddr{*ra}
+	}
+	return conn, nil
+}

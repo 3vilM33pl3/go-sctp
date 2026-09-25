@@ -38,6 +38,7 @@ const (
 	sctpSockoptBindxAdd       = 100
 	sctpSockoptBindxRem       = 101
 	sctpSockoptPeeloff        = 102
+	sctpSockoptPeeloffFlags   = 122
 	sctpSockoptConnectxOld    = 107
 	sctpGetPeerAddrs          = 108
 	sctpGetLocalAddrs         = 109
@@ -197,6 +198,11 @@ type sctpPeeloffArg struct {
 	FD      int32
 }
 
+type sctpPeeloffFlagsArg struct {
+	sctpPeeloffArg
+	Flags uint32
+}
+
 type sctpResetStreamsHeader struct {
 	AssocID       int32
 	Flags         uint16
@@ -228,6 +234,7 @@ const (
 	sizeofSCTPGetAddrs         = int(unsafe.Sizeof(sctpGetAddrs{}))
 	sizeofSCTPAssocIDsHeader   = int(unsafe.Sizeof(sctpAssocIDsHeader{}))
 	sizeofSCTPPeeloffArg       = int(unsafe.Sizeof(sctpPeeloffArg{}))
+	sizeofSCTPPeeloffFlagsArg  = int(unsafe.Sizeof(sctpPeeloffFlagsArg{}))
 	sizeofSCTPResetStreamsHdr  = int(unsafe.Sizeof(sctpResetStreamsHeader{}))
 	sizeofSCTPAddStreamsLinux  = int(unsafe.Sizeof(sctpAddStreamsLinux{}))
 )
@@ -564,12 +571,32 @@ func peelOffSCTP(c *SCTPConn, assocID int32) (*SCTPConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := sctpPeeloffArg{AssocID: resolved}
-	buf := unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPPeeloffArg)
-	if _, err := getSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptPeeloff, buf); err != nil {
+	// SCTP_SOCKOPT_PEELOFF_FLAGS (Linux 4.14) creates the descriptor
+	// non-blocking and close-on-exec atomically, the way accept4 does.
+	req := sctpPeeloffFlagsArg{sctpPeeloffArg: sctpPeeloffArg{AssocID: resolved}, Flags: syscall.SOCK_NONBLOCK | syscall.SOCK_CLOEXEC}
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPPeeloffFlagsArg)
+	_, err = getSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptPeeloffFlags, buf)
+	if err == nil {
+		return wrapPeeledSCTPFD(int(req.FD), c.fd.family, c.fd.net, resolved)
+	}
+	if !errors.Is(err, syscall.ENOPROTOOPT) {
 		return nil, err
 	}
-	return wrapPeeledSCTPFD(req.FD, c.fd.family, c.fd.net, resolved)
+	// Older kernels only have SCTP_SOCKOPT_PEELOFF, which inherits nothing.
+	// Hold ForkLock so a concurrent fork cannot inherit the descriptor
+	// before CloseOnExec marks it; see syscall/exec_unix.go.
+	old := sctpPeeloffArg{AssocID: resolved}
+	buf = unsafe.Slice((*byte)(unsafe.Pointer(&old)), sizeofSCTPPeeloffArg)
+	syscall.ForkLock.RLock()
+	_, err = getSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptPeeloff, buf)
+	if err == nil {
+		syscall.CloseOnExec(int(old.FD))
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	return wrapPeeledSCTPFD(int(old.FD), c.fd.family, c.fd.net, resolved)
 }
 
 func assocIDsSCTP(fd *netFD) ([]int32, error) {
@@ -850,32 +877,6 @@ func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
 		return 0, errors.New("sctp association id is not available yet")
 	}
 	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
-}
-
-func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTPConn, error) {
-	sotype, err := syscall.GetsockoptInt(int(sysfd), syscall.SOL_SOCKET, syscall.SO_TYPE)
-	if err != nil {
-		syscall.Close(int(sysfd))
-		return nil, wrapSyscallError("getsockopt", err)
-	}
-	fd := newFD(int(sysfd), family, sotype, net)
-	if err := fd.init(); err != nil {
-		fd.Close()
-		return nil, err
-	}
-	fd.isConnected = true
-	lsa, _ := syscall.Getsockname(fd.pfd.Sysfd)
-	rsa, _ := syscall.Getpeername(fd.pfd.Sysfd)
-	fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
-	conn := newSCTPConn(fd)
-	conn.assocID = assocID
-	if la, ok := conn.LocalAddr().(*SCTPAddr); ok && la != nil {
-		conn.multiLocal = []SCTPAddr{*la}
-	}
-	if ra, ok := conn.RemoteAddr().(*SCTPAddr); ok && ra != nil {
-		conn.multiPeer = []SCTPAddr{*ra}
-	}
-	return conn, nil
 }
 
 func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }

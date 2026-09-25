@@ -9,7 +9,6 @@ package net
 import (
 	"context"
 	"errors"
-	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -598,12 +597,24 @@ func peelOffSCTP(c *SCTPConn, assocID int32) (*SCTPConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	r0, _, errno := syscall.Syscall(syscall.SYS_SCTP_PEELOFF, uintptr(c.fd.pfd.Sysfd), uintptr(uint32(resolved)), 0)
-	runtime.KeepAlive(c.fd)
-	if errno != 0 {
-		return nil, wrapSyscallError("sctp_peeloff", errno)
+	// sctp_peeloff(2) takes no flags. Hold ForkLock so a concurrent fork
+	// cannot inherit the descriptor before CloseOnExec marks it; see
+	// syscall/exec_unix.go.
+	var newfd int
+	syscall.ForkLock.RLock()
+	err = rawSockopt(c.fd, func(s uintptr) syscall.Errno {
+		r0, _, errno := syscall.Syscall(syscall.SYS_SCTP_PEELOFF, s, uintptr(uint32(resolved)), 0)
+		if errno == 0 {
+			newfd = int(r0)
+			syscall.CloseOnExec(newfd)
+		}
+		return errno
+	})
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		return nil, wrapSyscallError("sctp_peeloff", err)
 	}
-	return wrapPeeledSCTPFD(int32(r0), c.fd.family, c.fd.net, resolved)
+	return wrapPeeledSCTPFD(newfd, c.fd.family, c.fd.net, resolved)
 }
 
 func assocIDsSCTP(fd *netFD) ([]int32, error) {
@@ -918,32 +929,6 @@ func resolveSCTPAssocID(c *SCTPConn, assocID int32) (int32, error) {
 		return 0, errors.New("sctp association id is not available yet")
 	}
 	return 0, errors.New("multiple SCTP associations are present; specify an association id explicitly")
-}
-
-func wrapPeeledSCTPFD(sysfd int32, family int, net string, assocID int32) (*SCTPConn, error) {
-	sotype, err := syscall.GetsockoptInt(int(sysfd), syscall.SOL_SOCKET, syscall.SO_TYPE)
-	if err != nil {
-		syscall.Close(int(sysfd))
-		return nil, wrapSyscallError("getsockopt", err)
-	}
-	fd := newFD(int(sysfd), family, sotype, net)
-	if err := fd.init(); err != nil {
-		fd.Close()
-		return nil, err
-	}
-	fd.isConnected = true
-	lsa, _ := syscall.Getsockname(fd.pfd.Sysfd)
-	rsa, _ := syscall.Getpeername(fd.pfd.Sysfd)
-	fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
-	conn := newSCTPConn(fd)
-	conn.assocID = assocID
-	if la, ok := conn.LocalAddr().(*SCTPAddr); ok && la != nil {
-		conn.multiLocal = []SCTPAddr{*la}
-	}
-	if ra, ok := conn.RemoteAddr().(*SCTPAddr); ok && ra != nil {
-		conn.multiPeer = []SCTPAddr{*ra}
-	}
-	return conn, nil
 }
 
 func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
