@@ -10,9 +10,11 @@ import (
 	"internal/strconv"
 	"io"
 	"net/netip"
+	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // SCTPAddr represents the address of an SCTP end point.
@@ -841,7 +843,11 @@ func openDialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, ra
 	return c, nil
 }
 
-// ListenSCTP acts like [ListenPacket] for SCTP networks.
+// ListenSCTP acts like [ListenPacket] for SCTP networks: it returns a
+// one-to-many style socket on which every incoming association is
+// multiplexed and messages carry the peer's address. For one-to-one style
+// listening, where each association becomes its own connection, use
+// [ListenSCTPOneToOne] or [Listen].
 func ListenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error) {
 	return listenSCTP(context.Background(), ListenConfig{}, network, laddr)
 }
@@ -902,4 +908,123 @@ func ListenSCTPInit(network string, laddr *SCTPAddr, opts SCTPInitOptions) (*SCT
 		return nil, err
 	}
 	return c, nil
+}
+
+// SCTPListener is a one-to-one style SCTP listener: each accepted
+// association becomes its own [SCTPConn], the way a [TCPListener] hands out
+// [TCPConn]s. [Listen] and [ListenConfig.Listen] return one for the SCTP
+// networks. For the one-to-many style, where a single socket carries every
+// association, use [ListenSCTP].
+type SCTPListener struct {
+	fd *netFD
+	lc ListenConfig
+}
+
+func (l *SCTPListener) ok() bool { return l != nil && l.fd != nil }
+
+// SyscallConn returns a raw network connection.
+// This implements the [syscall.Conn] interface.
+//
+// The returned RawConn only supports calling Control. Read and
+// Write return an error.
+func (l *SCTPListener) SyscallConn() (syscall.RawConn, error) {
+	if !l.ok() {
+		return nil, syscall.EINVAL
+	}
+	return newRawListener(l.fd), nil
+}
+
+// AcceptSCTP accepts the next incoming association and returns the new
+// connection.
+func (l *SCTPListener) AcceptSCTP() (*SCTPConn, error) {
+	if !l.ok() {
+		return nil, syscall.EINVAL
+	}
+	c, err := l.accept()
+	if err != nil {
+		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+	}
+	return c, nil
+}
+
+// Accept implements the Accept method in the [Listener] interface; it
+// waits for the next association and returns a generic [Conn].
+func (l *SCTPListener) Accept() (Conn, error) {
+	if !l.ok() {
+		return nil, syscall.EINVAL
+	}
+	c, err := l.accept()
+	if err != nil {
+		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+	}
+	return c, nil
+}
+
+// Close stops listening on the SCTP address.
+// Already accepted connections are not closed.
+func (l *SCTPListener) Close() error {
+	if !l.ok() {
+		return syscall.EINVAL
+	}
+	if err := l.close(); err != nil {
+		return &OpError{Op: "close", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+	}
+	return nil
+}
+
+// Addr returns the listener's network address, a [*SCTPAddr].
+// The Addr returned is shared by all invocations of Addr, so
+// do not modify it.
+func (l *SCTPListener) Addr() Addr { return l.fd.laddr }
+
+// SetDeadline sets the deadline associated with the listener.
+// A zero time value disables the deadline.
+func (l *SCTPListener) SetDeadline(t time.Time) error {
+	if !l.ok() {
+		return syscall.EINVAL
+	}
+	return l.fd.SetDeadline(t)
+}
+
+// File returns a copy of the underlying [os.File].
+// It is the caller's responsibility to close f when finished.
+// Closing l does not affect f, and closing f does not affect l.
+//
+// The returned os.File's file descriptor is different from the
+// connection's. Attempting to change properties of the original
+// using this duplicate may or may not have the desired effect.
+func (l *SCTPListener) File() (f *os.File, err error) {
+	if !l.ok() {
+		return nil, syscall.EINVAL
+	}
+	f, err = l.file()
+	if err != nil {
+		return nil, &OpError{Op: "file", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+	}
+	return
+}
+
+// ListenSCTPOneToOne acts like [Listen] for SCTP networks: it returns a
+// one-to-one style listener whose accepted connections are [SCTPConn]s.
+//
+// The network must be an SCTP network name; see func [Dial] for details.
+// If the IP field of laddr is nil or an unspecified IP address,
+// ListenSCTPOneToOne listens on all available unicast and anycast IP
+// addresses of the local system. If the Port field of laddr is 0, a port
+// number is automatically chosen.
+func ListenSCTPOneToOne(network string, laddr *SCTPAddr) (*SCTPListener, error) {
+	switch network {
+	case "sctp", "sctp4", "sctp6":
+	default:
+		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: UnknownNetworkError(network)}
+	}
+	if laddr == nil {
+		laddr = &SCTPAddr{}
+	}
+	sl := &sysListener{network: network, address: laddr.String()}
+	ln, err := sl.listenSCTPOneToOne(context.Background(), laddr)
+	if err != nil {
+		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+	}
+	return ln, nil
 }

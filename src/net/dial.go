@@ -930,6 +930,8 @@ func (lc *ListenConfig) Listen(ctx context.Context, network, address string) (Li
 		}
 	case *UnixAddr:
 		l, err = sl.listenUnix(ctx, la)
+	case *SCTPAddr:
+		l, err = sl.listenSCTPOneToOne(ctx, la)
 	default:
 		return nil, &OpError{Op: "listen", Net: sl.network, Source: nil, Addr: la, Err: &AddrError{Err: "unexpected address type", Addr: address}}
 	}
@@ -984,7 +986,9 @@ type sysListener struct {
 
 // Listen announces on the local network address.
 //
-// The network must be "tcp", "tcp4", "tcp6", "unix" or "unixpacket".
+// The network must be "tcp", "tcp4", "tcp6", "sctp", "sctp4", "sctp6",
+// "unix" or "unixpacket". For the SCTP networks the returned [Listener] is an
+// [*SCTPListener] accepting one-to-one style associations.
 //
 // For TCP networks, if the host in the address parameter is empty or
 // a literal unspecified IP address, Listen listens on all available

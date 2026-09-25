@@ -290,3 +290,12 @@ pkg net, type SCTPStreamReset struct, Flags uint16 #99999
 pkg net, type SCTPStreamReset struct, Streams []uint16 #99999
 pkg net (windows-386), const SCTPMsgNotification = 0 #99999
 pkg net (windows-amd64), const SCTPMsgNotification = 0 #99999
+pkg net, func ListenSCTPOneToOne(string, *SCTPAddr) (*SCTPListener, error) #99999
+pkg net, method (*SCTPListener) Accept() (Conn, error) #99999
+pkg net, method (*SCTPListener) AcceptSCTP() (*SCTPConn, error) #99999
+pkg net, method (*SCTPListener) Addr() Addr #99999
+pkg net, method (*SCTPListener) Close() error #99999
+pkg net, method (*SCTPListener) File() (*os.File, error) #99999
+pkg net, method (*SCTPListener) SetDeadline(time.Time) error #99999
+pkg net, method (*SCTPListener) SyscallConn() (syscall.RawConn, error) #99999
+pkg net, type SCTPListener struct #99999

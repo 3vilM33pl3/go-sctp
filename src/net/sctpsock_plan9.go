@@ -8,6 +8,7 @@ package net
 
 import (
 	"context"
+	"os"
 )
 
 func (c *SCTPConn) readFromSCTP([]byte) (n int, oobn int, flags int, addr *SCTPAddr, info *SCTPRcvInfo, err error) {
@@ -120,3 +121,11 @@ func sctpSendFailedSent(uint16) bool                   { return false }
 func parseSockaddrStorage([]byte) (*SCTPAddr, error)   { return nil, errSCTPUnsupported }
 
 const sctpPDAPIAssocIDOffset = 12
+
+func (ln *SCTPListener) accept() (*SCTPConn, error) { return nil, errSCTPUnsupported }
+func (ln *SCTPListener) close() error               { return errSCTPUnsupported }
+func (ln *SCTPListener) file() (*os.File, error)    { return nil, errSCTPUnsupported }
+
+func (sl *sysListener) listenSCTPOneToOne(context.Context, *SCTPAddr) (*SCTPListener, error) {
+	return nil, errSCTPUnsupported
+}

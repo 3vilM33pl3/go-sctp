@@ -665,3 +665,111 @@ func TestSCTPReadFromEOF(t *testing.T) {
 		t.Fatalf("Read after peer close = %d, %v; want 0, io.EOF", n, err)
 	}
 }
+
+// TestSCTPListenerAccept exercises net.Listen("sctp") end to end: the
+// listener is an *SCTPListener, net.Dial reaches it, the accepted connection
+// is a one-to-one SCTPConn with SCTP addresses, data flows both ways, and
+// deadlines and Close behave like TCPListener's.
+func TestSCTPListenerAccept(t *testing.T) {
+	requireSCTP(t)
+
+	ln, err := Listen("sctp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen error: %v", err)
+	}
+	defer ln.Close()
+	sl, ok := ln.(*SCTPListener)
+	if !ok {
+		t.Fatalf("Listen(sctp4) returned %T; want *SCTPListener", ln)
+	}
+	if _, ok := ln.Addr().(*SCTPAddr); !ok || ln.Addr().(*SCTPAddr).Port == 0 {
+		t.Fatalf("listener Addr = %v (%T); want a bound *SCTPAddr", ln.Addr(), ln.Addr())
+	}
+
+	cli, err := Dial("sctp4", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial error: %v", err)
+	}
+	defer cli.Close()
+	if _, ok := cli.(*SCTPConn); !ok {
+		t.Fatalf("Dial(sctp4) returned %T; want *SCTPConn", cli)
+	}
+
+	if err := sl.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetDeadline error: %v", err)
+	}
+	srv, err := sl.AcceptSCTP()
+	if err != nil {
+		t.Fatalf("AcceptSCTP error: %v", err)
+	}
+	defer srv.Close()
+	if ra, ok := srv.RemoteAddr().(*SCTPAddr); !ok || ra.Port != cli.LocalAddr().(*SCTPAddr).Port {
+		t.Fatalf("accepted RemoteAddr = %v; want the dialer's %v", srv.RemoteAddr(), cli.LocalAddr())
+	}
+	if la, ok := srv.LocalAddr().(*SCTPAddr); !ok || la.Port != ln.Addr().(*SCTPAddr).Port {
+		t.Fatalf("accepted LocalAddr = %v; want the listener's %v", srv.LocalAddr(), ln.Addr())
+	}
+
+	if _, err := cli.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	buf := make([]byte, 64)
+	if err := srv.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	n, err := srv.Read(buf)
+	if err != nil || string(buf[:n]) != "hello" {
+		t.Fatalf("Read = %q, %v; want hello", buf[:n], err)
+	}
+	if _, err := srv.WriteToSCTP([]byte("reply"), nil, &SCTPSndInfo{Stream: 1, PPID: 9}); err != nil {
+		t.Fatalf("WriteToSCTP error: %v", err)
+	}
+	n, _, _ = readUserMessageSCTP(t, cli.(*SCTPConn), buf)
+	if string(buf[:n]) != "reply" {
+		t.Fatalf("client Read = %q; want reply", buf[:n])
+	}
+	if status, err := srv.AssocStatus(0); err != nil || status.State == 0 {
+		t.Fatalf("accepted AssocStatus = %+v, %v; want a live association", status, err)
+	}
+
+	// An idle listener honours its deadline, and Accept after Close fails
+	// with ErrClosed, like TCPListener.
+	if err := sl.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sl.Accept(); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Accept on idle listener = %v; want deadline exceeded", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+	if _, err := sl.Accept(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Accept after Close = %v; want ErrClosed", err)
+	}
+}
+
+func TestListenSCTPOneToOneErrors(t *testing.T) {
+	requireSCTP(t)
+	if _, err := ListenSCTPOneToOne("bogus", nil); err == nil || !errors.Is(err, UnknownNetworkError("bogus")) {
+		var une UnknownNetworkError
+		if !errors.As(err, &une) {
+			t.Fatalf("ListenSCTPOneToOne(bogus) = %v; want UnknownNetworkError", err)
+		}
+	}
+	ln, err := ListenSCTPOneToOne("sctp", nil)
+	if err != nil {
+		t.Fatalf("ListenSCTPOneToOne(wildcard) error: %v", err)
+	}
+	defer ln.Close()
+	if ln.Addr().(*SCTPAddr).Port == 0 {
+		t.Fatalf("wildcard listener got port 0: %v", ln.Addr())
+	}
+	if _, err := ln.SyscallConn(); err != nil {
+		t.Fatalf("SyscallConn error: %v", err)
+	}
+	f, err := ln.File()
+	if err != nil {
+		t.Fatalf("File error: %v", err)
+	}
+	f.Close()
+}
