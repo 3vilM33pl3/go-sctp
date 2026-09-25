@@ -133,84 +133,10 @@ func sctpSendFailedSent(flags uint16) bool { return flags == 1 }
 // struct sctp_pdapi_event: pdapi_assoc_id follows the 32-bit indication.
 const sctpPDAPIAssocIDOffset = 12
 
-type sctpInitMsg struct {
-	NumOStreams    uint16
-	MaxInStreams   uint16
-	MaxAttempts    uint16
-	MaxInitTimeout uint16
-}
-
-type sctpSndInfoLinux struct {
-	Stream  uint16
-	Flags   uint16
-	PPID    uint32
-	Context uint32
-	AssocID int32
-}
-
-type sctpRcvInfoLinux struct {
-	Stream  uint16
-	SSN     uint16
-	Flags   uint16
-	_       uint16
-	PPID    uint32
-	TSN     uint32
-	CumTSN  uint32
-	Context uint32
-	AssocID int32
-}
-
-type sctpNxtInfoLinux struct {
-	Stream  uint16
-	Flags   uint16
-	PPID    uint32
-	Length  uint32
-	AssocID int32
-}
-
-type sctpRTOInfoLinux struct {
-	AssocID int32
-	Initial uint32
-	Max     uint32
-	Min     uint32
-}
-
-type sctpDelayedSackInfoLinux struct {
-	AssocID int32
-	Delay   uint32
-	Freq    uint32
-}
-
 type sctpPRInfoLinux struct {
 	AssocID int32
 	Value   uint32
 	Policy  uint16
-}
-
-type sctpAuthChunkLinux struct {
-	Chunk uint8
-}
-
-type sctpAuthKeyIDLinux struct {
-	AssocID int32
-	KeyID   uint16
-}
-
-type sctpAuthKeyHeaderLinux struct {
-	AssocID   int32
-	KeyID     uint16
-	KeyLength uint16
-}
-
-type sctpAssocValueLinux struct {
-	AssocID int32
-	Value   uint32
-}
-
-type sctpStreamValueLinux struct {
-	AssocID int32
-	Stream  uint16
-	Value   uint16
 }
 
 type sctpPrimaryAddrLinux struct {
@@ -245,10 +171,6 @@ type sctpGetAddrs struct {
 	AddrNum uint32
 }
 
-type sctpAssocIDsHeader struct {
-	Count uint32
-}
-
 type sctpPeeloffArg struct {
 	AssocID int32
 	FD      int32
@@ -259,190 +181,17 @@ type sctpPeeloffFlagsArg struct {
 	Flags uint32
 }
 
-type sctpResetStreamsHeader struct {
-	AssocID       int32
-	Flags         uint16
-	NumberStreams uint16
-}
-
-type sctpAddStreamsLinux struct {
-	AssocID    int32
-	InStreams  uint16
-	OutStreams uint16
-}
-
 const (
-	sizeofSCTPInitMsg          = int(unsafe.Sizeof(sctpInitMsg{}))
-	sizeofSCTPSndInfoLinux     = int(unsafe.Sizeof(sctpSndInfoLinux{}))
-	sizeofSCTPRcvInfo          = sizeofSCTPRcvInfoLinux
-	sizeofSCTPNxtInfo          = sizeofSCTPNxtInfoLinux
-	sizeofSCTPRcvInfoLinux     = int(unsafe.Sizeof(sctpRcvInfoLinux{}))
-	sizeofSCTPNxtInfoLinux     = int(unsafe.Sizeof(sctpNxtInfoLinux{}))
-	sizeofSCTPRTOInfoLinux     = int(unsafe.Sizeof(sctpRTOInfoLinux{}))
-	sizeofSCTPDelayedSackInfo  = int(unsafe.Sizeof(sctpDelayedSackInfoLinux{}))
 	sizeofSCTPPRInfoLinux      = int(unsafe.Sizeof(sctpPRInfoLinux{}))
-	sizeofSCTPAuthChunkLinux   = int(unsafe.Sizeof(sctpAuthChunkLinux{}))
-	sizeofSCTPAuthKeyIDLinux   = int(unsafe.Sizeof(sctpAuthKeyIDLinux{}))
-	sizeofSCTPAuthKeyHdrLinux  = int(unsafe.Sizeof(sctpAuthKeyHeaderLinux{}))
-	sizeofSCTPAssocValueLinux  = int(unsafe.Sizeof(sctpAssocValueLinux{}))
-	sizeofSCTPStreamValueLinux = int(unsafe.Sizeof(sctpStreamValueLinux{}))
 	sizeofSCTPPrimaryAddrLinux = int(unsafe.Sizeof(sctpPrimaryAddrLinux{}))
 	sizeofSCTPStatusLinux      = int(unsafe.Sizeof(sctpStatusLinux{}))
 	sizeofSCTPGetAddrs         = int(unsafe.Sizeof(sctpGetAddrs{}))
-	sizeofSCTPAssocIDsHeader   = int(unsafe.Sizeof(sctpAssocIDsHeader{}))
 	sizeofSCTPPeeloffArg       = int(unsafe.Sizeof(sctpPeeloffArg{}))
 	sizeofSCTPPeeloffFlagsArg  = int(unsafe.Sizeof(sctpPeeloffFlagsArg{}))
-	sizeofSCTPResetStreamsHdr  = int(unsafe.Sizeof(sctpResetStreamsHeader{}))
-	sizeofSCTPAddStreamsLinux  = int(unsafe.Sizeof(sctpAddStreamsLinux{}))
 )
-
-func marshalSCTPSndInfo(info *SCTPSndInfo) ([]byte, error) {
-	if info == nil {
-		return nil, nil
-	}
-
-	buf := make([]byte, syscall.CmsgSpace(sizeofSCTPSndInfoLinux))
-	h := (*syscall.Cmsghdr)(unsafe.Pointer(&buf[0]))
-	h.Level = syscall.IPPROTO_SCTP
-	h.Type = sctpCmsgTypeSndInfo
-	h.SetLen(syscall.CmsgLen(sizeofSCTPSndInfoLinux))
-
-	si := sctpSndInfoLinux{
-		Stream:  info.Stream,
-		Flags:   info.Flags,
-		PPID:    info.PPID,
-		Context: info.Context,
-		AssocID: info.AssocID,
-	}
-	copy(buf[syscall.CmsgLen(0):], unsafe.Slice((*byte)(unsafe.Pointer(&si)), sizeofSCTPSndInfoLinux))
-	return buf, nil
-}
-
-func parseSCTPRcvInfo(oob []byte) (*SCTPRcvInfo, error) {
-	if len(oob) == 0 {
-		return nil, nil
-	}
-
-	scms, err := syscall.ParseSocketControlMessage(oob)
-	if err != nil {
-		return nil, err
-	}
-	var info *SCTPRcvInfo
-	var nxt *SCTPNxtInfo
-	for _, scm := range scms {
-		if scm.Header.Level != syscall.IPPROTO_SCTP {
-			continue
-		}
-		switch scm.Header.Type {
-		case sctpCmsgTypeRcvInfo:
-			if len(scm.Data) < sizeofSCTPRcvInfoLinux {
-				return nil, errors.New("short SCTP_RCVINFO control message")
-			}
-			var ri sctpRcvInfoLinux
-			copy(unsafe.Slice((*byte)(unsafe.Pointer(&ri)), sizeofSCTPRcvInfoLinux), scm.Data[:sizeofSCTPRcvInfoLinux])
-			info = &SCTPRcvInfo{
-				Stream:  ri.Stream,
-				SSN:     ri.SSN,
-				Flags:   ri.Flags,
-				PPID:    ri.PPID,
-				TSN:     ri.TSN,
-				CumTSN:  ri.CumTSN,
-				Context: ri.Context,
-				AssocID: ri.AssocID,
-			}
-		case sctpCmsgTypeNxtInfo:
-			if len(scm.Data) < sizeofSCTPNxtInfoLinux {
-				return nil, errors.New("short SCTP_NXTINFO control message")
-			}
-			var ni sctpNxtInfoLinux
-			copy(unsafe.Slice((*byte)(unsafe.Pointer(&ni)), sizeofSCTPNxtInfoLinux), scm.Data[:sizeofSCTPNxtInfoLinux])
-			nxt = &SCTPNxtInfo{
-				Stream:  ni.Stream,
-				Flags:   ni.Flags,
-				PPID:    ni.PPID,
-				Length:  ni.Length,
-				AssocID: ni.AssocID,
-			}
-		}
-	}
-	if info == nil && nxt == nil {
-		return nil, nil
-	}
-	if info == nil {
-		info = &SCTPRcvInfo{}
-	}
-	info.Next = nxt
-	return info, nil
-}
-
-func setNoDelaySCTP(fd *netFD, noDelay bool) error {
-	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptNoDelay, boolint(noDelay))
-}
-
-func setSCTPInitOptions(fd *netFD, opts SCTPInitOptions) error {
-	sim := sctpInitMsg{
-		NumOStreams:    opts.NumOStreams,
-		MaxInStreams:   opts.MaxInStreams,
-		MaxAttempts:    opts.MaxAttempts,
-		MaxInitTimeout: opts.MaxInitTimeout,
-	}
-	if err := setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptInitMsg, unsafe.Slice((*byte)(unsafe.Pointer(&sim)), sizeofSCTPInitMsg)); err != nil {
-		return err
-	}
-	return setSCTPRecvRcvInfo(fd, true)
-}
-
-func setSCTPRecvRcvInfo(fd *netFD, on bool) error {
-	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptRecvRcvInfo, boolint(on))
-}
-
-func setSCTPRecvNxtInfo(fd *netFD, on bool) error {
-	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptRecvNxtInfo, boolint(on))
-}
-
-func setSCTPAutoClose(fd *netFD, seconds uint32) error {
-	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptAutoClose, int(seconds))
-}
-
-func setSCTPFragmentInterleave(fd *netFD, level int) error {
-	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptFragmentInter, level)
-}
-
-func setSCTPMaxBurst(c *SCTPConn, value uint32) error {
-	req := sctpAssocValueLinux{
-		AssocID: optionalSCTPAssocID(c),
-		Value:   value,
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptMaxBurst, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPAssocValueLinux))
-}
 
 func setSCTPMaxSeg(fd *netFD, value uint32) error {
 	return setSockoptInt(fd, syscall.IPPROTO_SCTP, sctpSockoptMaxSeg, int(value))
-}
-
-func setSCTPRTOInfo(c *SCTPConn, info SCTPRTOInfo) error {
-	if info.AssocID == 0 {
-		info.AssocID = c.assocID.Load()
-	}
-	raw := sctpRTOInfoLinux{
-		AssocID: info.AssocID,
-		Initial: info.Initial,
-		Max:     info.Max,
-		Min:     info.Min,
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptRTOInfo, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPRTOInfoLinux))
-}
-
-func setSCTPDelayedSack(c *SCTPConn, info SCTPDelayedSackInfo) error {
-	if info.AssocID == 0 {
-		info.AssocID = c.assocID.Load()
-	}
-	raw := sctpDelayedSackInfoLinux{
-		AssocID: info.AssocID,
-		Delay:   info.Delay,
-		Freq:    info.Frequency,
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptDelayedSack, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPDelayedSackInfo))
 }
 
 func setSCTPDefaultPRInfo(c *SCTPConn, info SCTPPRInfo) error {
@@ -455,56 +204,6 @@ func setSCTPDefaultPRInfo(c *SCTPConn, info SCTPPRInfo) error {
 		Policy:  uint16(info.Policy),
 	}
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptDefaultPRInfo, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPPRInfoLinux))
-}
-
-func setSCTPDefaultSendInfo(c *SCTPConn, info SCTPSndInfo) error {
-	raw := sctpSndInfoLinux{
-		Stream:  info.Stream,
-		Flags:   info.Flags,
-		PPID:    info.PPID,
-		Context: info.Context,
-		AssocID: info.AssocID,
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptDefaultSndInfo, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPSndInfoLinux))
-}
-
-func setSCTPAuthChunks(fd *netFD, chunks []uint8) error {
-	for _, chunk := range chunks {
-		raw := sctpAuthChunkLinux{Chunk: chunk}
-		if err := setSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptAuthChunk, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthChunkLinux)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func setSCTPAuthKey(c *SCTPConn, key SCTPAuthKey) error {
-	if key.AssocID == 0 {
-		key.AssocID = c.assocID.Load()
-	}
-	buf := make([]byte, sizeofSCTPAuthKeyHdrLinux+len(key.Secret))
-	hdr := (*sctpAuthKeyHeaderLinux)(unsafe.Pointer(&buf[0]))
-	hdr.AssocID = key.AssocID
-	hdr.KeyID = key.KeyID
-	hdr.KeyLength = uint16(len(key.Secret))
-	copy(buf[sizeofSCTPAuthKeyHdrLinux:], key.Secret)
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthKey, buf)
-}
-
-func setSCTPActiveAuthKey(c *SCTPConn, assocID int32, keyID uint16) error {
-	if assocID == 0 {
-		assocID = c.assocID.Load()
-	}
-	raw := sctpAuthKeyIDLinux{AssocID: assocID, KeyID: keyID}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthActiveKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthKeyIDLinux))
-}
-
-func deleteSCTPAuthKey(c *SCTPConn, assocID int32, keyID uint16) error {
-	if assocID == 0 {
-		assocID = c.assocID.Load()
-	}
-	raw := sctpAuthKeyIDLinux{AssocID: assocID, KeyID: keyID}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAuthDeleteKey, unsafe.Slice((*byte)(unsafe.Pointer(&raw)), sizeofSCTPAuthKeyIDLinux))
 }
 
 func setSCTPPrimaryAddr(c *SCTPConn, addr *SCTPAddr) error {
@@ -541,58 +240,6 @@ func setSCTPPeerPrimaryAddr(c *SCTPConn, addr *SCTPAddr) error {
 	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptSetPeerPrimary, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPPrimaryAddrLinux))
 }
 
-func enableSCTPStreamReset(c *SCTPConn, flags uint16) error {
-	req := sctpAssocValueLinux{
-		AssocID: optionalSCTPAssocID(c),
-		Value:   uint32(flags),
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptEnableStrReset, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPAssocValueLinux))
-}
-
-func resetSCTPStreams(c *SCTPConn, flags uint16, streams []uint16) error {
-	assocID, err := resolveSCTPAssocID(c, 0)
-	if err != nil {
-		return err
-	}
-	buf := make([]byte, sizeofSCTPResetStreamsHdr+len(streams)*2)
-	hdr := (*sctpResetStreamsHeader)(unsafe.Pointer(&buf[0]))
-	hdr.AssocID = assocID
-	hdr.Flags = flags
-	hdr.NumberStreams = uint16(len(streams))
-	offset := sizeofSCTPResetStreamsHdr
-	for _, stream := range streams {
-		*(*uint16)(unsafe.Pointer(&buf[offset])) = stream
-		offset += 2
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptResetStreams, buf)
-}
-
-func addSCTPStreams(c *SCTPConn, in, out uint16) error {
-	assocID, err := resolveSCTPAssocID(c, 0)
-	if err != nil {
-		return err
-	}
-	req := sctpAddStreamsLinux{AssocID: assocID, InStreams: in, OutStreams: out}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptAddStreams, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPAddStreamsLinux))
-}
-
-func setSCTPStreamScheduler(c *SCTPConn, policy SCTPScheduler) error {
-	req := sctpAssocValueLinux{
-		AssocID: optionalSCTPAssocID(c),
-		Value:   uint32(policy),
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptStreamSched, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPAssocValueLinux))
-}
-
-func setSCTPStreamSchedulerValue(c *SCTPConn, stream uint16, value uint16) error {
-	req := sctpStreamValueLinux{
-		AssocID: optionalSCTPAssocID(c),
-		Stream:  stream,
-		Value:   value,
-	}
-	return setSockoptBytes(c.fd, syscall.IPPROTO_SCTP, sctpSockoptStreamSchedVal, unsafe.Slice((*byte)(unsafe.Pointer(&req)), sizeofSCTPStreamValueLinux))
-}
-
 func peelOffSCTP(c *SCTPConn, assocID int32) (*SCTPConn, error) {
 	resolved, err := resolveSCTPAssocID(c, assocID)
 	if err != nil {
@@ -624,32 +271,6 @@ func peelOffSCTP(c *SCTPConn, assocID int32) (*SCTPConn, error) {
 		return nil, err
 	}
 	return wrapPeeledSCTPFD(int(old.FD), c.fd.family, c.fd.net, resolved)
-}
-
-func assocIDsSCTP(fd *netFD) ([]int32, error) {
-	buf := make([]byte, 4096)
-	n, err := getSockoptBytes(fd, syscall.IPPROTO_SCTP, sctpSockoptAssocIDList, buf)
-	if err != nil {
-		return nil, err
-	}
-	if n < sizeofSCTPAssocIDsHeader {
-		return nil, errors.New("short SCTP assoc id list response")
-	}
-	hdr := (*sctpAssocIDsHeader)(unsafe.Pointer(&buf[0]))
-	count := int(hdr.Count)
-	if count == 0 {
-		return nil, nil
-	}
-	if n < sizeofSCTPAssocIDsHeader+count*4 {
-		return nil, errors.New("truncated SCTP assoc id list response")
-	}
-	ids := make([]int32, count)
-	offset := sizeofSCTPAssocIDsHeader
-	for i := 0; i < count; i++ {
-		ids[i] = *(*int32)(unsafe.Pointer(&buf[offset]))
-		offset += 4
-	}
-	return ids, nil
 }
 
 func assocStatusSCTP(c *SCTPConn, assocID int32) (*SCTPAssocStatus, error) {
@@ -847,22 +468,6 @@ func marshalRawSockaddrsSCTP(family int, addrs []SCTPAddr) ([]byte, error) {
 			return nil, errors.New("unsupported sockaddr type for SCTP bindx")
 		}
 	}
-	return buf, nil
-}
-
-func marshalSockaddrStorage(family int, addr *SCTPAddr) ([]byte, error) {
-	if addr == nil {
-		return nil, errMissingAddress
-	}
-	addrs, err := marshalRawSockaddrsSCTP(family, []SCTPAddr{*addr})
-	if err != nil {
-		return nil, err
-	}
-	if len(addrs) > sockaddrStorageSize {
-		return nil, errors.New("sockaddr does not fit in sockaddr_storage")
-	}
-	buf := make([]byte, sockaddrStorageSize)
-	copy(buf, addrs)
 	return buf, nil
 }
 

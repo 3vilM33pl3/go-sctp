@@ -323,20 +323,20 @@ func TestSCTPDefaultSendInfoAndRecvNxtInfo(t *testing.T) {
 		t.Fatalf("default send metadata mismatch stream=%d ppid=%d", info.Stream, info.PPID)
 	}
 
-	oob := make([]byte, syscall.CmsgSpace(sizeofSCTPRcvInfoLinux)+syscall.CmsgSpace(sizeofSCTPNxtInfoLinux))
+	oob := make([]byte, syscall.CmsgSpace(sizeofSCTPRcvInfo)+syscall.CmsgSpace(sizeofSCTPNxtInfo))
 	rcvHdr := (*syscall.Cmsghdr)(unsafe.Pointer(&oob[0]))
 	rcvHdr.Level = syscall.IPPROTO_SCTP
 	rcvHdr.Type = sctpCmsgTypeRcvInfo
-	rcvHdr.SetLen(syscall.CmsgLen(sizeofSCTPRcvInfoLinux))
-	rcv := sctpRcvInfoLinux{Stream: 10, PPID: 1001, AssocID: 77}
-	copy(oob[syscall.CmsgLen(0):], unsafe.Slice((*byte)(unsafe.Pointer(&rcv)), sizeofSCTPRcvInfoLinux))
-	offset := syscall.CmsgSpace(sizeofSCTPRcvInfoLinux)
+	rcvHdr.SetLen(syscall.CmsgLen(sizeofSCTPRcvInfo))
+	rcv := sctpRcvInfo{Stream: 10, PPID: 1001, AssocID: 77}
+	copy(oob[syscall.CmsgLen(0):], unsafe.Slice((*byte)(unsafe.Pointer(&rcv)), sizeofSCTPRcvInfo))
+	offset := syscall.CmsgSpace(sizeofSCTPRcvInfo)
 	nxtHdr := (*syscall.Cmsghdr)(unsafe.Pointer(&oob[offset]))
 	nxtHdr.Level = syscall.IPPROTO_SCTP
 	nxtHdr.Type = sctpCmsgTypeNxtInfo
-	nxtHdr.SetLen(syscall.CmsgLen(sizeofSCTPNxtInfoLinux))
-	nxt := sctpNxtInfoLinux{Stream: 11, PPID: 1002, Length: uint32(len("nxt-second")), AssocID: 77}
-	copy(oob[offset+syscall.CmsgLen(0):], unsafe.Slice((*byte)(unsafe.Pointer(&nxt)), sizeofSCTPNxtInfoLinux))
+	nxtHdr.SetLen(syscall.CmsgLen(sizeofSCTPNxtInfo))
+	nxt := sctpNxtInfo{Stream: 11, PPID: 1002, Length: uint32(len("nxt-second")), AssocID: 77}
+	copy(oob[offset+syscall.CmsgLen(0):], unsafe.Slice((*byte)(unsafe.Pointer(&nxt)), sizeofSCTPNxtInfo))
 	parsed, err := parseSCTPRcvInfo(oob)
 	if err != nil {
 		t.Fatalf("parseSCTPRcvInfo error: %v", err)
