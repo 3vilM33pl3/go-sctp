@@ -5,7 +5,7 @@ name: SCTP release
 
 on:
   schedule:
-    - cron: '23 6 * * *'
+    - cron: '23 4 * * *'
   workflow_dispatch:
     inputs:
       version:
