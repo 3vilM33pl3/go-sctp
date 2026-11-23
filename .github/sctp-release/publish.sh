@@ -16,7 +16,7 @@ cd "$(git rev-parse --show-toplevel)"
 git tag -a "$version" -m "SCTP release $version on $UPSTREAM_TAG"
 # The lease makes the push fail if someone moved the release branch since
 # port.sh read it, instead of silently overwriting their work.
-git push --force-with-lease="refs/heads/$RELEASE_BRANCH:$OLD_RELEASE_HEAD" \
+git push --atomic --force-with-lease="refs/heads/$RELEASE_BRANCH:$OLD_RELEASE_HEAD" \
   origin "HEAD:refs/heads/$RELEASE_BRANCH" "refs/tags/$version"
 
 notes="$OUT_DIR/notes.md"

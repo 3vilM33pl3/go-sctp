@@ -43,6 +43,7 @@ jobs:
       - id: detect
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           INPUT_VERSION: ${{ inputs.version }}
         run: .github/sctp-release/detect.sh | tee -a "$GITHUB_OUTPUT"
 
@@ -60,6 +61,8 @@ jobs:
       UPSTREAM_TAG: ${{ matrix.version }}
       SCTP_RELEASE_OUT: ${{ runner.temp }}/sctp-release
       GH_TOKEN: ${{ github.token }}
+      # port.sh adds an "upstream" remote; without this gh would pick it.
+      GH_REPO: ${{ github.repository }}
       FROM_DEV: ${{ inputs.from_dev || 'false' }}
       FULL_SUITE: ${{ inputs.full_suite || 'false' }}
     steps:
