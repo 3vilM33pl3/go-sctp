@@ -1,0 +1,136 @@
+name: SCTP release
+
+# Cuts a Go+SCTP toolchain release for every new upstream Go release.
+# See .github/sctp-release/README.md.
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream tag to release, e.g. go1.27.4 (empty: every new release)'
+        required: false
+        default: ''
+      from_dev:
+        description: 'Re-port from the SCTP development branch instead of the release branch'
+        type: boolean
+        default: false
+      full_suite:
+        description: 'Also run the complete Go test suite'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Build and test only; do not push, tag or publish'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sctp-release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.detect.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: .github/sctp-release/detect.sh | tee -a "$GITHUB_OUTPUT"
+
+  release:
+    needs: detect
+    if: needs.detect.outputs.versions != '[]'
+    runs-on: [self-hosted, linux, sctp]
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        version: ${{ fromJSON(needs.detect.outputs.versions) }}
+    env:
+      UPSTREAM_TAG: ${{ matrix.version }}
+      SCTP_RELEASE_OUT: ${{ runner.temp }}/sctp-release
+      GH_TOKEN: ${{ github.token }}
+      FROM_DEV: ${{ inputs.from_dev || 'false' }}
+      FULL_SUITE: ${{ inputs.full_suite || 'false' }}
+    steps:
+      - name: Check out the release tooling
+        uses: actions/checkout@v4
+        with:
+          path: tools
+          sparse-checkout: .github/sctp-release
+
+      # SCTP_RELEASE_TOKEN must be able to push workflow files: rebased
+      # release branches carry .github/workflows changes, which the default
+      # GITHUB_TOKEN is not allowed to push.
+      - name: Check out the fork
+        uses: actions/checkout@v4
+        with:
+          path: src
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.SCTP_RELEASE_TOKEN || github.token }}
+
+      - name: Install bootstrap Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Prepare
+        run: |
+          rm -rf "$SCTP_RELEASE_OUT"; mkdir -p "$SCTP_RELEASE_OUT"
+          cd src
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Port SCTP onto ${{ matrix.version }}
+        id: port
+        working-directory: src
+        run: ../tools/.github/sctp-release/port.sh "$UPSTREAM_TAG"
+
+      - name: Choose release tag
+        id: tag
+        working-directory: src
+        run: |
+          . ../tools/.github/sctp-release/lib.sh
+          echo "name=$(next_release_tag "$UPSTREAM_TAG")" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build and test ${{ steps.tag.outputs.name }}
+        id: build
+        working-directory: src
+        run: ../tools/.github/sctp-release/build.sh "${{ steps.tag.outputs.name }}"
+
+      - name: Publish ${{ steps.tag.outputs.name }}
+        if: ${{ !inputs.dry_run }}
+        working-directory: src
+        run: ../tools/.github/sctp-release/publish.sh "${{ steps.tag.outputs.name }}"
+
+      - name: Report failure
+        if: failure() && !inputs.dry_run
+        working-directory: src
+        run: |
+          stage=publish
+          [[ "${{ steps.port.outcome }}" == failure ]] && stage=port
+          [[ "${{ steps.build.outcome }}" == failure ]] && stage='build and test'
+          ../tools/.github/sctp-release/report-failure.sh "$UPSTREAM_TAG" "$stage"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sctp-release-logs-${{ matrix.version }}
+          path: |
+            ${{ runner.temp }}/sctp-release/*.log
+            ${{ runner.temp }}/sctp-release/*.txt
+            ${{ runner.temp }}/sctp-release/interop-logs/
+          if-no-files-found: ignore
