@@ -23,7 +23,10 @@ in package `net` every time upstream Go ships a release.
    the Go/C++ interop matrix. `full_suite` adds `run.bash`.
 4. **Publish** (`publish.sh`). Tags `go1.N.M-sctp.K`, pushes the release
    branch and tag, and creates a GitHub Release with
-   `go1.N.M-sctp.K.linux-amd64.tar.gz`, the source tarball and `SHA256SUMS`.
+   `go1.N.M-sctp.K.linux-amd64.tar.gz`, cross-compiled
+   `darwin-arm64` (macOS on Apple Silicon, where SCTP calls return
+   the error "sctp is not supported on this platform") and `linux-arm64` (64-bit Raspberry Pi OS)
+   tarballs, the source tarball and `SHA256SUMS`.
 
 A conflict or a red test opens an issue titled `SCTP release blocked: go1.N.M`
 (`report-failure.sh`) and publishes nothing. The daily run skips that version
