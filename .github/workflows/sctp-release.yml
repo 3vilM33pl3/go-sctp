@@ -59,7 +59,6 @@ jobs:
         version: ${{ fromJSON(needs.detect.outputs.versions) }}
     env:
       UPSTREAM_TAG: ${{ matrix.version }}
-      SCTP_RELEASE_OUT: ${{ runner.temp }}/sctp-release
       GH_TOKEN: ${{ github.token }}
       # port.sh adds an "upstream" remote; without this gh would pick it.
       GH_REPO: ${{ github.repository }}
@@ -91,6 +90,10 @@ jobs:
 
       - name: Prepare
         run: |
+          # The runner context is not available in job-level env, so the
+          # output directory is exported here for the later steps.
+          SCTP_RELEASE_OUT="$RUNNER_TEMP/sctp-release"
+          echo "SCTP_RELEASE_OUT=$SCTP_RELEASE_OUT" >>"$GITHUB_ENV"
           rm -rf "$SCTP_RELEASE_OUT"; mkdir -p "$SCTP_RELEASE_OUT"
           cd src
           git config user.name 'github-actions[bot]'
