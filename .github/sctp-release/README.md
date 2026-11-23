@@ -5,7 +5,7 @@ in package `net` every time upstream Go ships a release.
 
 ## What a run does
 
-1. **Detect** (GitHub-hosted, daily at 06:23 UTC). Lists upstream `go1.N.M`
+1. **Detect** (GitHub-hosted, daily at 04:23 UTC). Lists upstream `go1.N.M`
    tags, keeps the newest patch of every minor version from `MIN_MINOR` on,
    and drops those that already have a `go1.N.M-sctp.K` tag here or an open
    `sctp-release-blocked` issue. Betas and release candidates never match.
