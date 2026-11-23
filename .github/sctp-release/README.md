@@ -25,7 +25,7 @@ in package `net` every time upstream Go ships a release.
    branch and tag, and creates a GitHub Release with
    `go1.N.M-sctp.K.linux-amd64.tar.gz`, cross-compiled
    `darwin-arm64` (macOS on Apple Silicon, where SCTP calls return
-   `errors.ErrUnsupported`) and `linux-arm64` (64-bit Raspberry Pi OS)
+   the error "sctp is not supported on this platform") and `linux-arm64` (64-bit Raspberry Pi OS)
    tarballs, the source tarball and `SHA256SUMS`.
 
 A conflict or a red test opens an issue titled `SCTP release blocked: go1.N.M`

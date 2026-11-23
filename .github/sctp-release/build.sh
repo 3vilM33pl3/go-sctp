@@ -73,7 +73,7 @@ end
 # Cross-compiled distributions for macOS on Apple Silicon and 64-bit
 # Raspberry Pi OS. They are built here after all tests, because each
 # make.bash -distpack run empties pkg/distpack. On macOS the SCTP API
-# compiles but returns errors matching errors.ErrUnsupported.
+# compiles but every call returns "sctp is not supported on this platform".
 for t in darwin/arm64 linux/arm64; do
   step "Cross distribution $t"
   (cd src && GOOS="${t%/*}" GOARCH="${t#*/}" ./make.bash -distpack)
