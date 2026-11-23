@@ -68,6 +68,20 @@ fi
 step "Package"
 rm -rf "$OUT_DIR/dist"; mkdir -p "$OUT_DIR/dist"
 cp pkg/distpack/"$version".*.tar.gz "$OUT_DIR/dist/"
+end
+
+# Cross-compiled distributions for macOS on Apple Silicon and 64-bit
+# Raspberry Pi OS. They are built here after all tests, because each
+# make.bash -distpack run empties pkg/distpack. On macOS the SCTP API
+# compiles but returns errors matching errors.ErrUnsupported.
+for t in darwin/arm64 linux/arm64; do
+  step "Cross distribution $t"
+  (cd src && GOOS="${t%/*}" GOARCH="${t#*/}" ./make.bash -distpack)
+  cp pkg/distpack/"$version.${t%/*}-${t#*/}.tar.gz" "$OUT_DIR/dist/"
+  end
+done
+
+step "Checksums"
 (cd "$OUT_DIR/dist" && sha256sum ./* | sed 's# \./# #' >SHA256SUMS)
 ls -l "$OUT_DIR/dist"
 end

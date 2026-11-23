@@ -34,6 +34,11 @@ notes="$OUT_DIR/notes.md"
   echo
   echo "Native SCTP needs the kernel module: \`sudo modprobe sctp\`."
   echo
+  echo "Other platforms: replace \`linux-amd64\` with \`linux-arm64\` for 64-bit Raspberry Pi OS,"
+  echo "or \`darwin-arm64\` for macOS on Apple Silicon (unpack with \`tar -xzf\` the same way)."
+  echo "macOS has no kernel SCTP: there the SCTP API compiles but returns errors matching"
+  echo "\`errors.ErrUnsupported\`, which is useful for writing code and cross-compiling for Linux."
+  echo
   echo "## SCTP commits on top of $UPSTREAM_TAG"
   echo
   git log --reverse --format='- %s' "$UPSTREAM_TAG..HEAD"
