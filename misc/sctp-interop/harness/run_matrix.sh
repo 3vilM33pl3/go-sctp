@@ -140,7 +140,7 @@ grep -q "GO_MULTI_CLIENT_SENT" "${GO_MULTI_CLIENT_LOG}"
 echo "[6/7] Go multihome failover path <- Go multihome client"
 (
   cd "${ROOT}"
-  GOROOT="${ROOT}" "${GO_BIN}" run ./misc/sctp-interop/go/multi_server.go "${GO_MULTI_HOSTS}" "${PORT_GO_MULTI_FAILOVER_SERVER}" >"${GO_MULTI_FAILOVER_SERVER_LOG}" 2>&1
+  GOROOT="${ROOT}" "${GO_BIN}" run ./misc/sctp-interop/go/multi_server.go "${GO_MULTI_HOSTS}" "${PORT_GO_MULTI_FAILOVER_SERVER}" 3 >"${GO_MULTI_FAILOVER_SERVER_LOG}" 2>&1
 ) &
 GO_MULTI_FAILOVER_SERVER_PID=$!
 sleep 1
@@ -150,8 +150,9 @@ sleep 1
 )
 wait "${GO_MULTI_FAILOVER_SERVER_PID}"
 
-grep -q "GO_MULTI_SERVER_RECV" "${GO_MULTI_FAILOVER_SERVER_LOG}"
-grep -q "payload=go-multi-failover" "${GO_MULTI_FAILOVER_SERVER_LOG}"
+# The client lists 127.0.0.3, which the server does not bind, first and sends
+# three messages; all three must arrive over the remaining addresses.
+[ "$(grep -c "GO_MULTI_SERVER_RECV stream=6 ppid=606 payload=go-multi-failover" "${GO_MULTI_FAILOVER_SERVER_LOG}")" -eq 3 ]
 grep -q "GO_MULTI_CLIENT_SENT" "${GO_MULTI_FAILOVER_CLIENT_LOG}"
 
 echo "[7/7] C++ multihome server <- C++ multihome client"
