@@ -795,3 +795,24 @@ func TestQueuedStreamBeyondNegotiated(t *testing.T) {
 	}
 	s.runUntil(time.Minute, func() bool { return ca.Buffered() == 0 })
 }
+
+func TestWindowExceptionBounded(t *testing.T) {
+	s := newSim(t, 19)
+	client, _ := s.endpoint("192.0.2.1:40000", false, nil)
+	server, srv := s.endpoint("192.0.2.2:5000", true, func(c *Config) { c.RecvBuffer = 8000 })
+	ca, _ := client.Connect(s.now, srv, 5000)
+	s.runUntil(time.Minute, func() bool { return ca.Established() && len(server.assocs) == 1 })
+	var sa *Association
+	for _, a := range server.assocs {
+		sa = a
+	}
+	// Consecutive TSNs on stream 0 whose SSNs skip the expected 0, so
+	// none can be delivered: the window must still hold.
+	for i := range 100 {
+		d := dataChunk{flags: dataFlagBegin | dataFlagEnd, tsn: sa.peerCum + 1, stream: 0, ssn: uint16(5 + i), payload: make([]byte, 1000)}
+		sa.handleData(s.now, d.chunk())
+	}
+	if sa.rcvHeld > 8000+1200 {
+		t.Fatalf("held %d bytes of undeliverable data with an 8000-byte window", sa.rcvHeld)
+	}
+}

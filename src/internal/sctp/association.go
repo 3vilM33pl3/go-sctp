@@ -599,10 +599,11 @@ func (a *Association) handleData(now time.Time, c chunk) {
 		return
 	}
 	// Drop new data beyond the window. An empty buffer always takes a
-	// chunk, so a zero-window probe makes progress. So does the next
-	// TSN in sequence while the application has nothing left to read:
-	// it lets partial delivery drain a window that reassembly filled.
-	if a.rcvHeld > 0 && a.rcvHeld+len(d.payload) > a.rcvBuf && !(d.tsn == a.peerCum+1 && a.unread == 0) {
+	// chunk, so a zero-window probe makes progress. So does a chunk
+	// that partial delivery can hand straight to an application with
+	// nothing left to read: it lets a window that reassembly filled
+	// drain.
+	if a.rcvHeld > 0 && a.rcvHeld+len(d.payload) > a.rcvBuf && !a.advancesPD(d) {
 		a.sackNow = true
 		return
 	}
@@ -706,6 +707,32 @@ func (a *Association) emitPiece(stream uint16, fs []inFrag, unordered, partial b
 		Partial: partial,
 	})
 	a.unread += n
+}
+
+// advancesPD reports whether d, arriving beyond the receive window,
+// would be delivered at once by partial delivery. Each such chunk is
+// handed to the application before another is admitted, which bounds
+// what the exception lets in to one chunk per read.
+func (a *Association) advancesPD(d dataChunk) bool {
+	if a.unread != 0 || d.stream >= a.numIn || a.deferred != nil {
+		return false
+	}
+	unordered := d.flags&dataFlagUnordered != 0
+	if pd := a.pd; pd != nil {
+		return d.tsn == pd.next && d.stream == pd.stream && unordered == pd.unordered && (unordered || d.ssn == pd.ssn)
+	}
+	if d.tsn != a.peerCum+1 || d.flags&dataFlagBegin == 0 {
+		return false
+	}
+	if unordered {
+		return true
+	}
+	s := a.instreams[d.stream]
+	next := uint16(0)
+	if s != nil {
+		next = s.nextSSN
+	}
+	return d.ssn == next
 }
 
 // continuePD delivers the pieces of the message under partial delivery

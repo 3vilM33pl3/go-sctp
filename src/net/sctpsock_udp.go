@@ -512,6 +512,9 @@ func (u *sctpUDPConn) readFrom(b []byte) (n, oobn, flags int, addr *SCTPAddr, in
 		if u.closed {
 			return 0, 0, 0, nil, nil, ErrClosed
 		}
+		if !u.rdl.IsZero() && !time.Now().Before(u.rdl) {
+			return 0, 0, 0, nil, nil, os.ErrDeadlineExceeded
+		}
 		if len(u.notifs) > 0 {
 			nb := u.notifs[0]
 			u.notifs = u.notifs[1:]

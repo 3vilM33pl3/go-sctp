@@ -542,3 +542,33 @@ func TestSCTPUDPMessageLargerThanWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSCTPUDPReadDeadlineWithQueuedData(t *testing.T) {
+	ln := listenUDPSCTP(t)
+	c := dialUDPSCTP(t, ln)
+	for _, m := range []string{"one", "two"} {
+		if _, err := c.Write([]byte(m)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := make([]byte, 16)
+	readData(t, ln, b)
+	// Wait until the second message is queued, then expire the deadline.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ln.udp.mu.Lock()
+		_, ok := ln.udp.ep.PeekMessage()
+		ln.udp.mu.Unlock()
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second message never arrived")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ln.SetReadDeadline(time.Now().Add(-time.Second))
+	if _, _, _, _, _, err := ln.ReadFromSCTP(b); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read with queued data after deadline = %v, want ErrDeadlineExceeded", err)
+	}
+}

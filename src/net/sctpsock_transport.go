@@ -162,15 +162,13 @@ func (c *SCTPConn) udpOpErr(op string, err error) error {
 }
 
 // udpAssocID resolves an association ID the way the kernel does: zero
-// means the connection's own association when there is one.
+// means the connection's own association when there is one. Any other
+// zero is resolved by the UDP transport under its lock.
 func (c *SCTPConn) udpAssocID(id int32) int32 {
 	if id != 0 {
 		return id
 	}
-	if c.assocID != 0 {
-		return c.assocID
-	}
-	return c.udp.defaultAssocID()
+	return c.assocID
 }
 
 // The methods below route the [Conn] methods inherited from conn to the

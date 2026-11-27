@@ -52,6 +52,5 @@ func (*sctpUDPConn) setRecvNxtInfo(bool) error                   { return errSCT
 func (*sctpUDPConn) setScheduler(SCTPScheduler) error            { return errSCTPUDPUnsupported }
 func (*sctpUDPConn) assocIDs() []int32                           { return nil }
 func (*sctpUDPConn) assocStatus(int32) (*SCTPAssocStatus, error) { return nil, errSCTPUDPUnsupported }
-func (*sctpUDPConn) defaultAssocID() int32                       { return 0 }
 func (*sctpUDPConn) resetStreams(int32, uint16, []uint16) error  { return errSCTPUDPUnsupported }
 func (*sctpUDPConn) addStreams(int32, uint16, uint16) error      { return errSCTPUDPUnsupported }
