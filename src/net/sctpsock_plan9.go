@@ -21,11 +21,11 @@ func (c *SCTPConn) writeToSCTP([]byte, *SCTPAddr, *SCTPSndInfo) (int, error) {
 	return 0, errSCTPUnsupported
 }
 
-func (sd *sysDialer) dialSCTP(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn, error) {
+func (sd *sysDialer) dialSCTPNative(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn, error) {
 	return nil, errSCTPUnsupported
 }
 
-func (sl *sysListener) listenSCTP(context.Context, *SCTPAddr) (*SCTPConn, error) {
+func (sl *sysListener) listenSCTPNative(context.Context, *SCTPAddr) (*SCTPConn, error) {
 	return nil, errSCTPUnsupported
 }
 
@@ -99,3 +99,11 @@ func addSCTPStreams(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported
 func setSCTPStreamScheduler(*SCTPConn, SCTPScheduler) error { return errSCTPUnsupported }
 
 func setSCTPStreamSchedulerValue(*SCTPConn, uint16, uint16) error { return errSCTPUnsupported }
+
+func (sd *sysDialer) openSCTP(context.Context, *SCTPAddr, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}
+
+func (sl *sysListener) openSCTPNative(context.Context, *SCTPAddr) (*SCTPConn, error) {
+	return nil, errSCTPUnsupported
+}

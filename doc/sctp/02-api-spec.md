@@ -11,6 +11,10 @@
 - `type SCTPRTOInfo struct`
 - `type SCTPAssocStatus struct`
 - `type SCTPEventMask struct`
+- `type SCTPTransportPolicy int` (`SCTPTransportDefault`, `SCTPNativePreferred`, `SCTPNativeOnly`, `SCTPNativePreferredWithConnectFallback`, `SCTPUDPOnly`)
+- `type SCTPUDPConfig struct { LocalEncapPort, RemoteEncapPort uint16 }`
+- `type SCTPTransportConfig struct { Policy SCTPTransportPolicy; UDP SCTPUDPConfig }`
+- `type SCTPTransport int` (`SCTPTransportNative`, `SCTPTransportUDP`)
 
 ## New Public Functions
 
@@ -19,6 +23,8 @@
 - `ListenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error)`
 - `ListenSCTPInit(network string, laddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error)`
 - `SCTPAddrFromAddrPort(addr netip.AddrPort) *SCTPAddr`
+- `DialSCTPConfig(ctx context.Context, network string, laddr, raddr *SCTPAddr, init SCTPInitOptions, t SCTPTransportConfig) (*SCTPConn, error)`
+- `ListenSCTPConfig(ctx context.Context, network string, laddr *SCTPAddr, init SCTPInitOptions, t SCTPTransportConfig) (*SCTPConn, error)`
 
 ## New SCTPConn Methods
 
@@ -42,6 +48,7 @@
 - `EnableStreamReset(flags uint16) error`
 - `ResetStreams(flags uint16, streams []uint16) error`
 - `AddStreams(in, out uint16) error`
+- `Transport() SCTPTransport`
 
 ## Dispatch Integration
 
@@ -52,6 +59,9 @@
 
 - Linux and FreeBSD 15/amd64 are supported SCTP platforms.
 - Other non-Linux builds still compile via stubs and return unsupported errors at runtime.
+- Without kernel SCTP, Unix builds fall back to SCTP over UDP (RFC 6951) by
+  default. GODEBUG `sctptransport=native|udp|preferred` overrides the policy.
+  See `09-udp-encapsulation.md` for what is supported over UDP.
 - `SCTPRcvInfo.Next` is populated when `SetRecvNxtInfo(true)` is enabled and
   the kernel supplies `SCTP_NXTINFO` ancillary data.
 - Dialed SCTP sockets use Linux `connectx` internally so association-level APIs
