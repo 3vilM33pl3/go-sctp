@@ -6,7 +6,6 @@ package net
 
 import (
 	"context"
-	"strings"
 	"syscall"
 )
 
@@ -27,7 +26,14 @@ func (a *SCTPMultiAddr) String() string {
 	for i := range a.Addrs {
 		parts = append(parts, a.Addrs[i].String())
 	}
-	return strings.Join(parts, ",")
+	s := ""
+	for i, p := range parts {
+		if i > 0 {
+			s += ","
+		}
+		s += p
+	}
+	return s
 }
 
 func (a *SCTPMultiAddr) copy() *SCTPMultiAddr {
@@ -178,6 +184,22 @@ func DialSCTPMulti(network string, laddr, raddr *SCTPMultiAddr) (*SCTPConn, erro
 }
 
 func dialSCTPMulti(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPMultiAddr) (*SCTPConn, error) {
+	return sctpWithFallback(SCTPTransportConfig{}, true,
+		func() (*SCTPConn, error) { return dialSCTPMultiNative(ctx, dialer, network, laddr, raddr) },
+		func(u SCTPUDPConfig) (*SCTPConn, error) {
+			// SCTP over UDP is single-homed.
+			if raddr == nil || len(raddr.Addrs) != 1 || (laddr != nil && len(laddr.Addrs) > 1) {
+				return nil, &OpError{Op: "dial", Net: network, Err: errSCTPUDPUnsupported}
+			}
+			var la *SCTPAddr
+			if laddr != nil && len(laddr.Addrs) == 1 {
+				la = &laddr.Addrs[0]
+			}
+			return dialSCTPTransport(ctx, dialer, network, la, &raddr.Addrs[0], nil, SCTPTransportConfig{Policy: SCTPUDPOnly, UDP: u})
+		})
+}
+
+func dialSCTPMultiNative(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPMultiAddr) (*SCTPConn, error) {
 	switch network {
 	case "sctp", "sctp4", "sctp6":
 	default:
@@ -274,6 +296,10 @@ func listenSCTPMulti(ctx context.Context, lc ListenConfig, network string, laddr
 		c.multiLocal = []SCTPAddr{*base}
 	}
 	if laddr != nil && len(laddr.Addrs) > 1 {
+		if c.udp != nil {
+			c.Close()
+			return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: la.opAddr(), Err: errSCTPUDPUnsupported}
+		}
 		extra := make([]SCTPAddr, len(laddr.Addrs)-1)
 		copy(extra, laddr.Addrs[1:])
 		if laa, ok := c.LocalAddr().(*SCTPAddr); ok {
@@ -312,7 +338,7 @@ func (c *SCTPConn) LocalAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
-	if c.assocID != 0 {
+	if c.assocID != 0 && c.udp == nil {
 		if addrs, err := localAddrsSCTP(c.fd, c.assocID); err == nil && len(addrs) > 0 {
 			c.multiLocal = copySCTPAddrs(addrs)
 			return addrs, nil
@@ -332,7 +358,7 @@ func (c *SCTPConn) PeerAddrs() ([]SCTPAddr, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
-	if c.assocID != 0 {
+	if c.assocID != 0 && c.udp == nil {
 		if addrs, err := peerAddrsSCTP(c.fd, c.assocID); err == nil && len(addrs) > 0 {
 			c.multiPeer = copySCTPAddrs(addrs)
 			return addrs, nil
@@ -341,7 +367,7 @@ func (c *SCTPConn) PeerAddrs() ([]SCTPAddr, error) {
 	if len(c.multiPeer) > 0 {
 		return copySCTPAddrs(c.multiPeer), nil
 	}
-	if a, ok := c.fd.raddr.(*SCTPAddr); ok && a != nil {
+	if a, ok := c.RemoteAddr().(*SCTPAddr); ok && a != nil {
 		return []SCTPAddr{*a}, nil
 	}
 	return nil, nil

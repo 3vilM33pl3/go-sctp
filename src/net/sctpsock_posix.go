@@ -8,8 +8,12 @@ package net
 
 import (
 	"context"
+	"errors"
 	"syscall"
 )
+
+// errSCTPUnsupported is never returned here; the UDP fallback checks for it.
+var errSCTPUnsupported = errors.New("sctp is not supported on this platform")
 
 func sockaddrToSCTP(sa syscall.Sockaddr) Addr {
 	switch sa := sa.(type) {
@@ -89,7 +93,7 @@ func (c *SCTPConn) writeToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int
 	return n, nil
 }
 
-func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+func (sd *sysDialer) dialSCTPNative(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -128,7 +132,7 @@ func (sd *sysDialer) openSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCT
 	return newSCTPConn(fd), nil
 }
 
-func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
+func (sl *sysListener) listenSCTPNative(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -142,7 +146,7 @@ func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPCo
 	return newSCTPConn(fd), nil
 }
 
-func (sl *sysListener) openSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
+func (sl *sysListener) openSCTPNative(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {

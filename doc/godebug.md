@@ -153,6 +153,15 @@ for example,
 see the [runtime documentation](/pkg/runtime#hdr-Environment_Variables)
 and the [go command documentation](/cmd/go#hdr-Build_and_test_caching).
 
+### go-sctp
+
+The SCTP-enabled fork adds a `sctptransport` setting that chooses how package
+net carries SCTP when a call does not pass an explicit policy.
+The default, `sctptransport=preferred`, uses kernel SCTP when the host has it
+and otherwise carries SCTP over UDP (RFC 6951) through a user-space engine.
+`sctptransport=native` uses only kernel SCTP, and `sctptransport=udp` always
+uses UDP encapsulation.
+
 ### Go 1.26
 
 Go 1.26 added a new `httpcookiemaxnum` setting that controls the maximum number

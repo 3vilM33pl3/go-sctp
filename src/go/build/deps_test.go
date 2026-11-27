@@ -429,6 +429,10 @@ var depsRules = `
 	os, net/netip
 	< internal/routebsd;
 
+	# internal/sctp is the user-space SCTP engine behind SCTP over UDP.
+	errors, hash/crc32, internal/byteorder, math/bits, net/netip, time
+	< internal/sctp;
+
 	# net is unavoidable when doing any networking,
 	# so large dependencies must be kept out.
 	# This is a long-looking list but most of these
@@ -440,6 +444,7 @@ var depsRules = `
 	internal/nettrace,
 	internal/poll,
 	internal/routebsd,
+	internal/sctp,
 	internal/singleflight,
 	net/netip,
 	os,

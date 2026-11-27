@@ -58,6 +58,7 @@ var All = []Info{
 	{Name: "randautoseed", Package: "math/rand"},
 	{Name: "randseednop", Package: "math/rand", Changed: 24, Old: "0"},
 	{Name: "rsa1024min", Package: "crypto/rsa", Changed: 24, Old: "0"},
+	{Name: "sctptransport", Package: "net", Opaque: true},
 	{Name: "tarinsecurepath", Package: "archive/tar"},
 	{Name: "tls10server", Package: "crypto/tls", Changed: 22, Old: "1"},
 	{Name: "tls3des", Package: "crypto/tls", Changed: 23, Old: "1"},

@@ -244,6 +244,7 @@ type SCTPEventMask struct {
 // for SCTP network connections.
 type SCTPConn struct {
 	conn
+	udp        *sctpUDPConn // non-nil when carried over UDP (RFC 6951)
 	multiLocal []SCTPAddr
 	multiPeer  []SCTPAddr
 	assocID    int32
@@ -256,6 +257,9 @@ func newSCTPConn(fd *netFD) *SCTPConn { return &SCTPConn{conn: conn{fd}} }
 func (c *SCTPConn) SyscallConn() (syscall.RawConn, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
+	}
+	if c.udp != nil {
+		return nil, errSCTPUDPUnsupported
 	}
 	return newRawConn(c.fd), nil
 }
@@ -274,6 +278,10 @@ func (c *SCTPConn) ReadFromSCTP(b []byte) (n int, oobn int, flags int, addr *SCT
 	if !c.ok() {
 		return 0, 0, 0, nil, nil, syscall.EINVAL
 	}
+	if c.udp != nil {
+		n, oobn, flags, addr, info, err = c.udp.readFrom(b)
+		return n, oobn, flags, addr, info, c.udpOpErr("read", err)
+	}
 	n, oobn, flags, addr, info, err = c.readFromSCTP(b)
 	if info != nil && info.AssocID != 0 && c.assocID == 0 {
 		c.assocID = info.AssocID
@@ -291,7 +299,14 @@ func (c *SCTPConn) WriteTo(b []byte, addr Addr) (int, error) {
 	}
 	a, ok := addr.(*SCTPAddr)
 	if !ok {
+		if c.udp != nil {
+			return 0, c.udpOpErr("write", syscall.EINVAL)
+		}
 		return 0, &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr, Err: syscall.EINVAL}
+	}
+	if c.udp != nil {
+		n, err := c.udp.writeTo(b, a, nil)
+		return n, c.udpOpErr("write", err)
 	}
 	n, err := c.writeToSCTP(b, a, nil)
 	if err != nil {
@@ -305,6 +320,10 @@ func (c *SCTPConn) WriteToSCTP(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int
 	if !c.ok() {
 		return 0, syscall.EINVAL
 	}
+	if c.udp != nil {
+		n, err := c.udp.writeTo(b, addr, info)
+		return n, c.udpOpErr("write", err)
+	}
 	n, err := c.writeToSCTP(b, addr, info)
 	if err != nil {
 		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.opAddr(), Err: err}
@@ -317,6 +336,9 @@ func (c *SCTPConn) SetNoDelay(noDelay bool) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setNoDelay(noDelay))
+	}
 	if err := setNoDelaySCTP(c.fd, noDelay); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -327,6 +349,9 @@ func (c *SCTPConn) SetNoDelay(noDelay bool) error {
 func (c *SCTPConn) SetInitOptions(opts SCTPInitOptions) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setInit(opts))
 	}
 	if err := setSCTPInitOptions(c.fd, opts); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -339,6 +364,9 @@ func (c *SCTPConn) SubscribeEvents(mask SCTPEventMask) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.subscribe(mask))
+	}
 	if err := subscribeSCTPEvents(c.fd, mask); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -349,6 +377,9 @@ func (c *SCTPConn) SubscribeEvents(mask SCTPEventMask) error {
 func (c *SCTPConn) SetRTOInfo(info SCTPRTOInfo) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setRTO(info))
 	}
 	if err := setSCTPRTOInfo(c, info); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -361,6 +392,9 @@ func (c *SCTPConn) SetDelayedSack(info SCTPDelayedSackInfo) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setDelayedSack(info))
+	}
 	if err := setSCTPDelayedSack(c, info); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -371,6 +405,9 @@ func (c *SCTPConn) SetDelayedSack(info SCTPDelayedSackInfo) error {
 func (c *SCTPConn) SetDefaultPRInfo(info SCTPPRInfo) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setDefaultPR(info))
 	}
 	if err := setSCTPDefaultPRInfo(c, info); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -383,6 +420,9 @@ func (c *SCTPConn) SetDefaultSendInfo(info SCTPSndInfo) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setDefaultSend(info))
+	}
 	if err := setSCTPDefaultSendInfo(c, info); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -393,6 +433,9 @@ func (c *SCTPConn) SetDefaultSendInfo(info SCTPSndInfo) error {
 func (c *SCTPConn) SetAuthChunks(chunks []uint8) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
 	}
 	if err := setSCTPAuthChunks(c.fd, chunks); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -405,6 +448,9 @@ func (c *SCTPConn) SetAuthKey(key SCTPAuthKey) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := setSCTPAuthKey(c, key); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -415,6 +461,9 @@ func (c *SCTPConn) SetAuthKey(key SCTPAuthKey) error {
 func (c *SCTPConn) ActivateAuthKey(assocID int32, keyID uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
 	}
 	if err := setSCTPActiveAuthKey(c, assocID, keyID); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -427,6 +476,9 @@ func (c *SCTPConn) DeleteAuthKey(assocID int32, keyID uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := deleteSCTPAuthKey(c, assocID, keyID); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -437,6 +489,9 @@ func (c *SCTPConn) DeleteAuthKey(assocID int32, keyID uint16) error {
 func (c *SCTPConn) SetRecvRcvInfo(on bool) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setRecvRcvInfo(on))
 	}
 	if err := setSCTPRecvRcvInfo(c.fd, on); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -449,6 +504,9 @@ func (c *SCTPConn) SetRecvNxtInfo(on bool) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setRecvNxtInfo(on))
+	}
 	if err := setSCTPRecvNxtInfo(c.fd, on); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -459,6 +517,9 @@ func (c *SCTPConn) SetRecvNxtInfo(on bool) error {
 func (c *SCTPConn) SetAutoClose(seconds uint32) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
 	}
 	if err := setSCTPAutoClose(c.fd, seconds); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -471,6 +532,9 @@ func (c *SCTPConn) SetFragmentInterleave(level int) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := setSCTPFragmentInterleave(c.fd, level); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -481,6 +545,9 @@ func (c *SCTPConn) SetFragmentInterleave(level int) error {
 func (c *SCTPConn) SetMaxBurst(value uint32) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
 	}
 	if err := setSCTPMaxBurst(c, value); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -493,6 +560,9 @@ func (c *SCTPConn) SetMaxSeg(value uint32) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := setSCTPMaxSeg(c.fd, value); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -503,6 +573,9 @@ func (c *SCTPConn) SetMaxSeg(value uint32) error {
 func (c *SCTPConn) BindAddrs(addrs []SCTPAddr) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("bind", errSCTPUDPUnsupported)
 	}
 	addrs = c.normalizeLocalAddrs(addrs)
 	if err := bindAddrsSCTP(c.fd, addrs); err != nil {
@@ -516,6 +589,9 @@ func (c *SCTPConn) BindAddrs(addrs []SCTPAddr) error {
 func (c *SCTPConn) UnbindAddrs(addrs []SCTPAddr) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("bind", errSCTPUDPUnsupported)
 	}
 	addrs = c.normalizeLocalAddrs(addrs)
 	if err := unbindAddrsSCTP(c.fd, addrs); err != nil {
@@ -531,6 +607,9 @@ func (c *SCTPConn) SetPrimaryAddr(addr *SCTPAddr) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := setSCTPPrimaryAddr(c, addr); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.opAddr(), Err: err}
 	}
@@ -543,6 +622,9 @@ func (c *SCTPConn) SetPeerPrimaryAddr(addr *SCTPAddr) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
+	}
 	if err := setSCTPPeerPrimaryAddr(c, addr); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.opAddr(), Err: err}
 	}
@@ -553,6 +635,9 @@ func (c *SCTPConn) SetPeerPrimaryAddr(addr *SCTPAddr) error {
 func (c *SCTPConn) PeelOff(assocID int32) (*SCTPConn, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
+	}
+	if c.udp != nil {
+		return nil, c.udpOpErr("peeloff", errSCTPUDPUnsupported)
 	}
 	conn, err := peelOffSCTP(c, assocID)
 	if err != nil {
@@ -566,6 +651,9 @@ func (c *SCTPConn) AssocIDs() ([]int32, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udp.assocIDs(), nil
+	}
 	ids, err := assocIDsSCTP(c.fd)
 	if err != nil {
 		return nil, &OpError{Op: "get", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -577,6 +665,10 @@ func (c *SCTPConn) AssocIDs() ([]int32, error) {
 func (c *SCTPConn) AssocStatus(assocID int32) (*SCTPAssocStatus, error) {
 	if !c.ok() {
 		return nil, syscall.EINVAL
+	}
+	if c.udp != nil {
+		st, err := c.udp.assocStatus(c.udpAssocID(assocID))
+		return st, c.udpOpErr("get", err)
 	}
 	status, err := assocStatusSCTP(c, assocID)
 	if err != nil {
@@ -590,6 +682,9 @@ func (c *SCTPConn) EnableStreamReset(flags uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return nil // always enabled over UDP
+	}
 	if err := enableSCTPStreamReset(c, flags); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -600,6 +695,9 @@ func (c *SCTPConn) EnableStreamReset(flags uint16) error {
 func (c *SCTPConn) ResetStreams(flags uint16, streams []uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.resetStreams(c.udpAssocID(0), flags, streams))
 	}
 	if err := resetSCTPStreams(c, flags, streams); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -612,6 +710,9 @@ func (c *SCTPConn) AddStreams(in, out uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.addStreams(c.udpAssocID(0), in, out))
+	}
 	if err := addSCTPStreams(c, in, out); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -623,6 +724,9 @@ func (c *SCTPConn) SetStreamScheduler(policy SCTPScheduler) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
+	if c.udp != nil {
+		return c.udpOpErr("set", c.udp.setScheduler(policy))
+	}
 	if err := setSCTPStreamScheduler(c, policy); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -633,6 +737,9 @@ func (c *SCTPConn) SetStreamScheduler(policy SCTPScheduler) error {
 func (c *SCTPConn) SetStreamSchedulerValue(stream uint16, value uint16) error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	if c.udp != nil {
+		return c.udpOpErr("set", errSCTPUDPUnsupported)
 	}
 	if err := setSCTPStreamSchedulerValue(c, stream, value); err != nil {
 		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
@@ -658,6 +765,9 @@ func (c *SCTPConn) normalizeLocalAddrs(addrs []SCTPAddr) []SCTPAddr {
 }
 
 // DialSCTP acts like [Dial] for SCTP networks.
+//
+// When the host has no kernel SCTP, DialSCTP carries SCTP over UDP
+// (RFC 6951) instead; see [SCTPTransportPolicy].
 func DialSCTP(network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	return dialSCTP(context.Background(), nil, network, laddr, raddr)
 }
@@ -667,7 +777,51 @@ func DialSCTPInit(network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) 
 	return dialSCTPInit(context.Background(), nil, network, laddr, raddr, opts)
 }
 
+// DialSCTPConfig acts like [DialSCTPInit] with an explicit transport
+// configuration. A zero init leaves the association defaults unchanged.
+func DialSCTPConfig(ctx context.Context, network string, laddr, raddr *SCTPAddr, init SCTPInitOptions, t SCTPTransportConfig) (*SCTPConn, error) {
+	if ctx == nil {
+		panic("nil context")
+	}
+	return dialSCTPTransport(ctx, nil, network, laddr, raddr, &init, t)
+}
+
 func dialSCTPInit(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
+	return dialSCTPTransport(ctx, dialer, network, laddr, raddr, &opts, SCTPTransportConfig{})
+}
+
+func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+	return dialSCTPTransport(ctx, dialer, network, laddr, raddr, nil, SCTPTransportConfig{})
+}
+
+// dialSCTPTransport dials natively and, as the policy allows, over UDP.
+// opts, if non-nil, configures association setup.
+func dialSCTPTransport(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr, opts *SCTPInitOptions, t SCTPTransportConfig) (*SCTPConn, error) {
+	switch network {
+	case "sctp", "sctp4", "sctp6":
+	default:
+		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: UnknownNetworkError(network)}
+	}
+	if raddr == nil {
+		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: nil, Err: errMissingAddress}
+	}
+	return sctpWithFallback(t, true,
+		func() (*SCTPConn, error) {
+			if opts != nil && *opts != (SCTPInitOptions{}) {
+				return dialSCTPInitNative(ctx, dialer, network, laddr, raddr, *opts)
+			}
+			return dialSCTPNative(ctx, dialer, network, laddr, raddr)
+		},
+		func(u SCTPUDPConfig) (*SCTPConn, error) {
+			c, err := dialSCTPUDP(ctx, dialer, network, laddr, raddr, opts, u)
+			if err != nil {
+				return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
+			}
+			return c, nil
+		})
+}
+
+func dialSCTPInitNative(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
 	d := &Dialer{}
 	if dialer != nil {
 		*d = *dialer
@@ -736,23 +890,15 @@ func dialSCTPInit(ctx context.Context, dialer *Dialer, network string, laddr, ra
 		}
 		return innerErr
 	}
-	return dialSCTP(ctx, d, network, laddr, raddr)
+	return dialSCTPNative(ctx, d, network, laddr, raddr)
 }
 
-func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
-	switch network {
-	case "sctp", "sctp4", "sctp6":
-	default:
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if raddr == nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: nil, Err: errMissingAddress}
-	}
+func dialSCTPNative(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
 	sd := &sysDialer{network: network, address: raddr.String()}
 	if dialer != nil {
 		sd.Dialer = *dialer
 	}
-	c, err := sd.dialSCTP(ctx, laddr, raddr)
+	c, err := sd.dialSCTPNative(ctx, laddr, raddr)
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: laddr.opAddr(), Addr: raddr.opAddr(), Err: err}
 	}
@@ -761,6 +907,18 @@ func dialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr 
 		c.multiLocal = []SCTPAddr{*la}
 	}
 	return c, nil
+}
+
+// dialSCTP is the entry point for [Dialer.Dial] with an SCTP network.
+func (sd *sysDialer) dialSCTP(ctx context.Context, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
+	d := sd.Dialer
+	c, err := dialSCTP(ctx, &d, sd.network, laddr, raddr)
+	if err != nil {
+		if oe, ok := err.(*OpError); ok {
+			return nil, oe.Err // Dialer.Dial wraps it again
+		}
+	}
+	return c, err
 }
 
 func openDialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *SCTPAddr) (*SCTPConn, error) {
@@ -784,8 +942,20 @@ func openDialSCTP(ctx context.Context, dialer *Dialer, network string, laddr, ra
 }
 
 // ListenSCTP acts like [ListenPacket] for SCTP networks.
+//
+// When the host has no kernel SCTP, ListenSCTP accepts SCTP over UDP
+// (RFC 6951) on the same port instead; see [SCTPTransportPolicy].
 func ListenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error) {
 	return listenSCTP(context.Background(), ListenConfig{}, network, laddr)
+}
+
+// ListenSCTPConfig acts like [ListenSCTPInit] with an explicit transport
+// configuration. A zero init leaves the association defaults unchanged.
+func ListenSCTPConfig(ctx context.Context, network string, laddr *SCTPAddr, init SCTPInitOptions, t SCTPTransportConfig) (*SCTPConn, error) {
+	if ctx == nil {
+		panic("nil context")
+	}
+	return listenSCTPTransport(ctx, ListenConfig{}, network, laddr, &init, t, true)
 }
 
 // OpenSCTP opens an unconnected one-to-many SCTP socket bound to laddr.
@@ -794,54 +964,74 @@ func OpenSCTP(network string, laddr *SCTPAddr) (*SCTPConn, error) {
 }
 
 func listenSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPAddr) (*SCTPConn, error) {
-	switch network {
-	case "sctp", "sctp4", "sctp6":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if laddr == nil {
-		laddr = &SCTPAddr{}
-	}
-	sl := &sysListener{ListenConfig: lc, network: network, address: laddr.String()}
-	c, err := sl.listenSCTP(ctx, laddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
-	}
-	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
-	}
-	return c, nil
+	return listenSCTPTransport(ctx, lc, network, laddr, nil, SCTPTransportConfig{}, true)
 }
 
 func openSCTP(ctx context.Context, lc ListenConfig, network string, laddr *SCTPAddr) (*SCTPConn, error) {
+	return listenSCTPTransport(ctx, lc, network, laddr, nil, SCTPTransportConfig{}, false)
+}
+
+// listenSCTPTransport opens a one-to-many endpoint. With accept set it
+// takes incoming associations (listen); without, it only originates them.
+func listenSCTPTransport(ctx context.Context, lc ListenConfig, network string, laddr *SCTPAddr, opts *SCTPInitOptions, t SCTPTransportConfig, accept bool) (*SCTPConn, error) {
+	op := "listen"
+	if !accept {
+		op = "open"
+	}
 	switch network {
 	case "sctp", "sctp4", "sctp6":
 	default:
-		return nil, &OpError{Op: "open", Net: network, Source: nil, Addr: laddr.opAddr(), Err: UnknownNetworkError(network)}
+		return nil, &OpError{Op: op, Net: network, Source: nil, Addr: laddr.opAddr(), Err: UnknownNetworkError(network)}
 	}
 	if laddr == nil {
 		laddr = &SCTPAddr{}
 	}
-	sl := &sysListener{ListenConfig: lc, network: network, address: laddr.String()}
-	c, err := sl.openSCTP(ctx, laddr)
+	return sctpWithFallback(t, false,
+		func() (*SCTPConn, error) {
+			sl := &sysListener{ListenConfig: lc, network: network, address: laddr.String()}
+			var c *SCTPConn
+			var err error
+			if accept {
+				c, err = sl.listenSCTPNative(ctx, laddr)
+			} else {
+				c, err = sl.openSCTPNative(ctx, laddr)
+			}
+			if err != nil {
+				return nil, &OpError{Op: op, Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+			}
+			if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
+				c.multiLocal = []SCTPAddr{*la}
+			}
+			if opts != nil && *opts != (SCTPInitOptions{}) {
+				if err := c.SetInitOptions(*opts); err != nil {
+					c.Close()
+					return nil, err
+				}
+			}
+			return c, nil
+		},
+		func(u SCTPUDPConfig) (*SCTPConn, error) {
+			c, err := listenSCTPUDP(ctx, lc, network, laddr, opts, u, accept)
+			if err != nil {
+				return nil, &OpError{Op: op, Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+			}
+			return c, nil
+		})
+}
+
+// listenSCTP is the entry point for [ListenConfig.ListenPacket] with an
+// SCTP network.
+func (sl *sysListener) listenSCTP(ctx context.Context, laddr *SCTPAddr) (*SCTPConn, error) {
+	c, err := listenSCTP(ctx, sl.ListenConfig, sl.network, laddr)
 	if err != nil {
-		return nil, &OpError{Op: "open", Net: network, Source: nil, Addr: laddr.opAddr(), Err: err}
+		if oe, ok := err.(*OpError); ok {
+			return nil, oe.Err
+		}
 	}
-	if la, ok := c.LocalAddr().(*SCTPAddr); ok && la != nil {
-		c.multiLocal = []SCTPAddr{*la}
-	}
-	return c, nil
+	return c, err
 }
 
 // ListenSCTPInit acts like [ListenSCTP] and configures SCTP_INITMSG on the socket.
 func ListenSCTPInit(network string, laddr *SCTPAddr, opts SCTPInitOptions) (*SCTPConn, error) {
-	c, err := listenSCTP(context.Background(), ListenConfig{}, network, laddr)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.SetInitOptions(opts); err != nil {
-		c.Close()
-		return nil, err
-	}
-	return c, nil
+	return listenSCTPTransport(context.Background(), ListenConfig{}, network, laddr, &opts, SCTPTransportConfig{}, true)
 }

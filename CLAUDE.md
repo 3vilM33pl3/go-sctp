@@ -58,6 +58,8 @@ Requires `cmake`, `g++`, `linux-libc-dev`, and SCTP kernel module loaded (`sudo 
 | `sctpsock_linux.go` | Linux constants, syscall wrappers (setsockopt/getsockopt), cmsg marshal/parse |
 | `sctpsock_posix.go` | POSIX socket I/O: dial, listen, read/write with metadata |
 | `sctpmultisock.go` | Multi-address endpoint support (multihoming, failover) |
+| `sctpsock_transport.go` | Transport policy types, GODEBUG `sctptransport`, UDP dispatch of `Conn` methods |
+| `sctpsock_udp.go` | SCTP over UDP (RFC 6951) socket layer on top of `internal/sctp` (Unix) |
 | `sctpsock_stub.go` | Unsupported stubs for non-Linux platforms |
 | `sctpsock_test.go` | Platform-agnostic unit tests |
 | `sctpsock_linux_test.go` | Linux integration tests (loopback, metadata, multihoming) |
@@ -81,6 +83,8 @@ SCTP socket options are frozen in the `syscall` package — new constants are de
 ### Test skip mechanism
 
 Linux tests call `requireSCTP(t)` which skips if the kernel lacks SCTP support, so tests compile and pass (via skip) on machines without SCTP.
+
+The user-space SCTP engine used by the UDP fallback lives in `src/internal/sctp/` (sans-IO, tested with `go test internal/sctp`).
 
 ## Documentation
 
