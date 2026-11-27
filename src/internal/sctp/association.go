@@ -50,6 +50,7 @@ type outMsg struct {
 	value     uint32
 	expires   time.Time
 	abandoned bool
+	sent      bool // a fragment has been given a TSN
 }
 
 // outChunk is a DATA chunk owned by the sender.
@@ -1197,6 +1198,11 @@ func (a *Association) handleTimers(now time.Time) {
 		a.prAdvance(now)
 		a.transmitRetxOnly(now)
 	}
+	if due(a.hbTimer) && !a.Established() {
+		// No heartbeats once shutdown has started; a stale deadline
+		// would otherwise keep NextDeadline in the past.
+		a.hbTimer = time.Time{}
+	}
 	if due(a.hbTimer) && a.Established() {
 		if a.hbOutstanding {
 			a.errors++
@@ -1299,12 +1305,26 @@ func (a *Association) transmit(now time.Time) {
 		burst := 0
 		kept := a.pending[:0]
 		stop := false
+		consumed := false
 		for i, c := range a.pending {
 			if stop {
 				kept = append(kept, a.pending[i:]...)
 				break
 			}
 			if c.msg.abandoned {
+				if c.msg.sent && a.peerFwdTSN {
+					// The unsent tail of a partly sent message.
+					// Give it TSNs without sending it, so the
+					// FORWARD TSN that skips it covers the whole
+					// message even after its sent fragments were
+					// acked (RFC 3758 section 3.5).
+					c.tsn = a.nextTSN
+					a.nextTSN++
+					c.abandoned = true
+					a.inflight = append(a.inflight, c)
+					consumed = true
+					continue
+				}
 				a.buffered -= len(c.payload)
 				continue
 			}
@@ -1326,6 +1346,7 @@ func (a *Association) transmit(now time.Time) {
 			}
 			c.tsn = a.nextTSN
 			a.nextTSN++
+			c.msg.sent = true
 			if c.flags&dataFlagBegin != 0 && !c.msg.unordered {
 				c.msg.ssn = a.outSSN[c.msg.stream]
 				a.outSSN[c.msg.stream]++
@@ -1347,6 +1368,13 @@ func (a *Association) transmit(now time.Time) {
 			a.pending[i] = nil
 		}
 		a.pending = kept
+		if consumed {
+			a.prAdvance(now)
+			if a.fwdTSNNeed {
+				add(a.buildForwardTSN())
+				a.fwdTSNNeed = false
+			}
+		}
 	}
 	flush()
 	if sentData {

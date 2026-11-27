@@ -816,3 +816,51 @@ func TestWindowExceptionBounded(t *testing.T) {
 		t.Fatalf("held %d bytes of undeliverable data with an 8000-byte window", sa.rcvHeld)
 	}
 }
+
+func TestPRTTLExpiresAfterPrefixAcked(t *testing.T) {
+	s := newSim(t, 20)
+	s.delay = 100 * time.Millisecond
+	_, server, ca, _ := connectPair(t, s)
+	// The first flight is acked well after the 20ms lifetime, while
+	// most fragments are still queued.
+	big := make([]byte, 100_000)
+	ca.Send(s.now, big, SendInfo{Stream: 0, PRPolicy: PRTTL, PRValue: 20})
+	ca.Send(s.now, []byte("after"), SendInfo{Stream: 0})
+	var got []string
+	s.runUntil(time.Minute, func() bool {
+		for {
+			m, ok := server.PollMessage(s.now)
+			if !ok {
+				break
+			}
+			got = append(got, string(m.Data[:min(len(m.Data), 5)]))
+			if string(m.Data) == "after" {
+				return true
+			}
+		}
+		return false
+	})
+	if len(got) != 1 {
+		t.Fatalf("delivered %q, want only the message after the abandoned one", got)
+	}
+	s.runUntil(time.Minute, func() bool { return ca.Buffered() == 0 && len(ca.inflight) == 0 })
+}
+
+func TestNoHeartbeatSpinInShutdownAckSent(t *testing.T) {
+	s := newSim(t, 21)
+	_, server, _, _ := connectPair(t, s)
+	// Put the server in SHUTDOWN-ACK-SENT, as when SHUTDOWN COMPLETE is
+	// lost, and let the heartbeat deadline pass.
+	var sa *Association
+	for _, a := range server.assocs {
+		sa = a
+	}
+	sa.state = stateShutdownAckSent
+	sa.hbTimer = s.now.Add(time.Second)
+	sa.t2 = s.now.Add(time.Hour)
+	later := s.now.Add(2 * time.Second)
+	server.HandleTimers(later)
+	if d := server.NextDeadline(); !d.IsZero() && !d.After(later) {
+		t.Fatalf("NextDeadline = %v, still due at %v", d, later)
+	}
+}
