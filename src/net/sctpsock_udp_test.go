@@ -262,6 +262,14 @@ func TestSCTPUDPReadDeadline(t *testing.T) {
 	}
 }
 
+// notifState returns the sac_state of an SCTP_ASSOC_CHANGE notification.
+func notifState(b []byte) uint16 {
+	if goarchBigEndian() {
+		return uint16(b[8])<<8 | uint16(b[9])
+	}
+	return uint16(b[8]) | uint16(b[9])<<8
+}
+
 func TestSCTPUDPNotifications(t *testing.T) {
 	ln := listenUDPSCTP(t)
 	if err := ln.SubscribeEvents(SCTPEventMask{Association: true, Shutdown: true}); err != nil {
@@ -275,7 +283,7 @@ func TestSCTPUDPNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if flags&sctpUDPMsgNotification == 0 || n != 20 || b[8] != 0 || b[9] != 0 {
+	if flags&sctpUDPMsgNotification == 0 || n != 20 || notifState(b) != sctpCommUp {
 		t.Fatalf("first read: flags %#x, %d bytes %x; want COMM_UP", flags, n, b[:n])
 	}
 	readData(t, ln, b)
@@ -297,7 +305,7 @@ func TestSCTPUDPNotifications(t *testing.T) {
 		case sctpNotifShutdown:
 			sawShutdown = true
 		case sctpNotifAssocChange:
-			if n == 20 && b[8]|b[9] != 0 {
+			if n == 20 && notifState(b) == sctpShutdownComp {
 				sawComp = true
 			}
 		}

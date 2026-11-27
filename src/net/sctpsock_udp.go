@@ -57,19 +57,31 @@ func sctpNotifType(t uint16) uint16 {
 	return 1<<15 | t
 }
 
+// Notification types and SCTP_ASSOC_CHANGE states. FreeBSD numbers the
+// association states from 1 and orders the later notification types
+// differently from Linux (netinet/sctp_uio.h).
 const (
-	sctpNotifAssocChange  = 1
-	sctpNotifShutdown     = 5
-	sctpNotifSenderDry    = 9
-	sctpNotifStreamReset  = 10
-	sctpNotifStreamChange = 12
+	sctpNotifAssocChange = 1
+	sctpNotifShutdown    = 5
+)
 
-	sctpCommUp       = 0
-	sctpCommLost     = 1
-	sctpRestart      = 2
-	sctpShutdownComp = 3
-	sctpCantStrAssoc = 4
+var (
+	sctpNotifSenderDry, sctpNotifStreamReset, sctpNotifStreamChange = func() (uint16, uint16, uint16) {
+		if runtime.GOOS == "freebsd" {
+			return 10, 9, 13
+		}
+		return 9, 10, 12
+	}()
 
+	sctpCommUp, sctpCommLost, sctpRestart, sctpShutdownComp, sctpCantStrAssoc = func() (uint16, uint16, uint16, uint16, uint16) {
+		if runtime.GOOS == "freebsd" {
+			return 1, 2, 3, 4, 5
+		}
+		return 0, 1, 2, 3, 4
+	}()
+)
+
+const (
 	sctpStreamResetIncoming = 0x0001
 	sctpStreamResetOutgoing = 0x0002
 	sctpStreamResetDenied   = 0x0004
