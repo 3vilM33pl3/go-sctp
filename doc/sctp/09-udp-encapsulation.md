@@ -118,5 +118,7 @@ GOROOT=$(pwd) ./bin/go test internal/sctp -run '^$' -fuzz FuzzInput -fuzztime 60
 ```
 
 The `net` tests force UDP with `SCTPUDPOnly`, so they run on hosts with and
-without kernel SCTP. Interop against usrsctp, rust-sctp, Linux kernel UDP
-encapsulation (`net.sctp.udp_port`) and FreeBSD is still to be run.
+without kernel SCTP. `misc/sctp-interop/udp` holds an interop matrix against
+usrsctp and rust-sctp, both directions, which passes on Linux (rust-sctp with
+64 KiB messages, its engine's limit). Linux kernel UDP encapsulation
+(`net.sctp.udp_port`, `d-kernel.sh`) and FreeBSD are still to be run.
