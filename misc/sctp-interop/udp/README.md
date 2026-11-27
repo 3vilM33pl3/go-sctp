@@ -22,6 +22,10 @@ USRSCTP=/path/to/usrsctp ./run_matrix.sh
 `sudo sysctl -w net.sctp.udp_port=9899 net.sctp.encap_port=9900`, which
 changes SCTP for the whole host until reverted with `... =0`.
 
+PPIDs follow the kernel convention (raw memory, callers htonl) on Go, rust-sctp
+and the Linux kernel alike; usrsctp apps htonl explicitly. The echo protocol
+round-trips the value, so all peers agree.
+
 Known peer limitations (not Go bugs):
 
 - rust-sctp's engine (vendored sctp-proto) caps messages at 64 KiB. A larger

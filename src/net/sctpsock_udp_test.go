@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"internal/byteorder"
 	"internal/goarch"
 	"io"
 	"os"
@@ -578,5 +579,116 @@ func TestSCTPUDPReadDeadlineWithQueuedData(t *testing.T) {
 	ln.SetReadDeadline(time.Now().Add(-time.Second))
 	if _, _, _, _, _, err := ln.ReadFromSCTP(b); !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("read with queued data after deadline = %v, want ErrDeadlineExceeded", err)
+	}
+}
+
+// TestSCTPUDPPPIDWireOrder checks that SCTPSndInfo.PPID reaches the wire as
+// the raw bytes the kernel would send (callers htonl, like sinfo_ppid), and
+// that the value survives an echo.
+func TestSCTPUDPPPIDWireOrder(t *testing.T) {
+	ln := listenUDPSCTP(t)
+	if err := ln.SetRecvRcvInfo(true); err != nil {
+		t.Fatal(err)
+	}
+	lnAddr := ln.LocalAddr().(*SCTPAddr)
+	front, err := ListenUDP("udp4", &UDPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer front.Close()
+	back, err := ListenUDP("udp4", &UDPAddr{IP: IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer back.Close()
+
+	// The tap relays client <-> listener and records each DATA chunk's PPID bytes.
+	var mu sync.Mutex
+	var seen [][]byte
+	var client *UDPAddr
+	record := func(p []byte) {
+		for c := p[12:]; len(c) >= 4; {
+			l := int(c[2])<<8 | int(c[3])
+			if l < 4 || l > len(c) {
+				return
+			}
+			if c[0] == 0 && l >= 16 {
+				mu.Lock()
+				seen = append(seen, append([]byte(nil), c[12:16]...))
+				mu.Unlock()
+			}
+			c = c[min(len(c), (l+3)&^3):]
+		}
+	}
+	go func() {
+		b := make([]byte, 65536)
+		for {
+			n, from, err := front.ReadFromUDP(b)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			client = from
+			mu.Unlock()
+			record(b[:n])
+			back.WriteToUDP(b[:n], &UDPAddr{IP: IPv4(127, 0, 0, 1), Port: lnAddr.Port})
+		}
+	}()
+	go func() {
+		b := make([]byte, 65536)
+		for {
+			n, _, err := back.ReadFromUDP(b)
+			if err != nil {
+				return
+			}
+			record(b[:n])
+			mu.Lock()
+			to := client
+			mu.Unlock()
+			front.WriteToUDP(b[:n], to)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := DialSCTPConfig(ctx, "sctp4", nil, lnAddr, SCTPInitOptions{},
+		SCTPTransportConfig{Policy: SCTPUDPOnly, UDP: SCTPUDPConfig{RemoteEncapPort: uint16(front.LocalAddr().(*UDPAddr).Port)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeWait(t, c)
+	if err := c.SetRecvRcvInfo(true); err != nil {
+		t.Fatal(err)
+	}
+	const ppid = 0x10032
+	if _, err := c.WriteToSCTP([]byte("ppid"), nil, &SCTPSndInfo{Stream: 1, PPID: ppid}); err != nil {
+		t.Fatal(err)
+	}
+	b := make([]byte, 64)
+	n, from, info := readData(t, ln, b)
+	if info == nil || info.PPID != ppid {
+		t.Fatalf("listener got PPID %+v, want %#x", info, ppid)
+	}
+	if _, err := ln.WriteToSCTP(b[:n], from, &SCTPSndInfo{Stream: info.Stream, PPID: info.PPID, AssocID: info.AssocID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, info = readData(t, c, b); info == nil || info.PPID != ppid {
+		t.Fatalf("echo PPID %+v, want %#x", info, ppid)
+	}
+
+	// The kernel copies the field as raw memory: host byte order on the wire.
+	want := byteorder.LEAppendUint32(nil, ppid) // 32 00 01 00
+	if goarch.BigEndian {
+		want = byteorder.BEAppendUint32(nil, ppid)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("saw %d DATA chunks, want 2", len(seen))
+	}
+	for i, w := range seen {
+		if !bytes.Equal(w, want) {
+			t.Errorf("DATA %d PPID on the wire % x, want % x", i, w, want)
+		}
 	}
 }

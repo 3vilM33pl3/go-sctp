@@ -40,6 +40,13 @@ c, err := net.DialSCTPConfig(ctx, "sctp", nil, raddr, net.SCTPInitOptions{},
 Encapsulation ports default to the SCTP ports, the same as rust-sctp. Replies
 follow the UDP source port the peer actually uses (RFC 6951 section 5.5).
 
+`SCTPSndInfo.PPID`, `SCTPRcvInfo.PPID` and `SCTPNxtInfo.PPID` follow the kernel
+convention on both transports, the same as rust-sctp: the field is copied to
+the wire as raw memory, so callers convert with htonl/ntohl (for example
+`binary.BigEndian.Uint32` of the bytes they want on the wire). On a
+little-endian host, PPID `0x10032` goes on the wire as `32 00 01 00`. A
+program therefore sends the same bytes whichever transport it ends up on.
+
 ## Architecture
 
 - `src/internal/sctp`: sans-IO engine. Datagrams, application sends and timer
