@@ -43,6 +43,17 @@ func main() {
 		}
 		port = p
 	}
+	// The number of user messages to wait for before exiting. Exiting early
+	// tears the association down while the client is still sending.
+	want := 1
+	if len(os.Args) > 3 {
+		w, err := strconv.Atoi(os.Args[3])
+		if err != nil || w < 1 {
+			fmt.Fprintf(os.Stderr, "invalid message count %q\n", os.Args[3])
+			os.Exit(1)
+		}
+		want = w
+	}
 
 	rawAddrs := make([]string, 0, len(hosts))
 	for _, h := range hosts {
@@ -84,6 +95,8 @@ func main() {
 			ppid = info.PPID
 		}
 		fmt.Printf("GO_MULTI_SERVER_RECV stream=%d ppid=%d payload=%s\n", stream, ppid, string(buf[:n]))
-		return
+		if want--; want == 0 {
+			return
+		}
 	}
 }

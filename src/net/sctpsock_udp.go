@@ -49,6 +49,18 @@ var sctpUDPFlagEOF, sctpUDPFlagAbort = func() (uint16, uint16) {
 	return 0x0200, 0x0004 // MSG_FIN, SCTP_ABORT
 }()
 
+// sctpUDPPPID converts a PPID between the net API and the engine, in
+// either direction. The kernel copies sinfo_ppid to the wire as raw
+// memory (callers htonl it), so to put the same bytes on the wire as the
+// native path the UDP transport byte-swaps on little-endian hosts. The
+// engine holds the PPID as the big-endian value of the wire field.
+func sctpUDPPPID(v uint32) uint32 {
+	if goarch.BigEndian {
+		return v
+	}
+	return v>>24 | v>>8&0xff00 | v<<8&0xff0000 | v<<24
+}
+
 // Notification types (Linux numbering; FreeBSD uses the low bits).
 func sctpNotifType(t uint16) uint16 {
 	if runtime.GOOS == "freebsd" {
@@ -57,19 +69,31 @@ func sctpNotifType(t uint16) uint16 {
 	return 1<<15 | t
 }
 
+// Notification types and SCTP_ASSOC_CHANGE states. FreeBSD numbers the
+// association states from 1 and orders the later notification types
+// differently from Linux (netinet/sctp_uio.h).
 const (
-	sctpNotifAssocChange  = 1
-	sctpNotifShutdown     = 5
-	sctpNotifSenderDry    = 9
-	sctpNotifStreamReset  = 10
-	sctpNotifStreamChange = 12
+	sctpNotifAssocChange = 1
+	sctpNotifShutdown    = 5
+)
 
-	sctpCommUp       = 0
-	sctpCommLost     = 1
-	sctpRestart      = 2
-	sctpShutdownComp = 3
-	sctpCantStrAssoc = 4
+var (
+	sctpNotifSenderDry, sctpNotifStreamReset, sctpNotifStreamChange = func() (uint16, uint16, uint16) {
+		if runtime.GOOS == "freebsd" {
+			return 10, 9, 13
+		}
+		return 9, 10, 12
+	}()
 
+	sctpCommUp, sctpCommLost, sctpRestart, sctpShutdownComp, sctpCantStrAssoc = func() (uint16, uint16, uint16, uint16, uint16) {
+		if runtime.GOOS == "freebsd" {
+			return 1, 2, 3, 4, 5
+		}
+		return 0, 1, 2, 3, 4
+	}()
+)
+
+const (
 	sctpStreamResetIncoming = 0x0001
 	sctpStreamResetOutgoing = 0x0002
 	sctpStreamResetDenied   = 0x0004
@@ -482,7 +506,7 @@ func (u *sctpUDPConn) rcvInfo(m *sctp.Message) *SCTPRcvInfo {
 		info = &SCTPRcvInfo{
 			Stream:  m.Stream,
 			SSN:     m.SSN,
-			PPID:    m.PPID,
+			PPID:    sctpUDPPPID(m.PPID),
 			TSN:     m.TSN,
 			CumTSN:  m.CumTSN,
 			AssocID: m.Assoc,
@@ -496,7 +520,7 @@ func (u *sctpUDPConn) rcvInfo(m *sctp.Message) *SCTPRcvInfo {
 			if info == nil {
 				info = &SCTPRcvInfo{}
 			}
-			info.Next = &SCTPNxtInfo{Stream: next.Stream, PPID: next.PPID, Length: uint32(len(next.Data)), AssocID: next.Assoc}
+			info.Next = &SCTPNxtInfo{Stream: next.Stream, PPID: sctpUDPPPID(next.PPID), Length: uint32(len(next.Data)), AssocID: next.Assoc}
 			if next.Unordered {
 				info.Next.Flags = SCTPUnordered
 			}
@@ -644,7 +668,7 @@ func (u *sctpUDPConn) writeTo(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int,
 		}
 		return 0, syscall.EINVAL
 	}
-	send := sctp.SendInfo{Stream: si.Stream, PPID: si.PPID, Unordered: si.Flags&SCTPUnordered != 0}
+	send := sctp.SendInfo{Stream: si.Stream, PPID: sctpUDPPPID(si.PPID), Unordered: si.Flags&SCTPUnordered != 0}
 	switch u.defPR.Policy {
 	case SCTPPRTTL:
 		send.PRPolicy, send.PRValue = sctp.PRTTL, u.defPR.Value

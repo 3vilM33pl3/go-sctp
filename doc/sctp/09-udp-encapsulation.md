@@ -40,6 +40,13 @@ c, err := net.DialSCTPConfig(ctx, "sctp", nil, raddr, net.SCTPInitOptions{},
 Encapsulation ports default to the SCTP ports, the same as rust-sctp. Replies
 follow the UDP source port the peer actually uses (RFC 6951 section 5.5).
 
+`SCTPSndInfo.PPID`, `SCTPRcvInfo.PPID` and `SCTPNxtInfo.PPID` follow the kernel
+convention on both transports, the same as rust-sctp: the field is copied to
+the wire as raw memory, so callers convert with htonl/ntohl (for example
+`binary.BigEndian.Uint32` of the bytes they want on the wire). On a
+little-endian host, PPID `0x10032` goes on the wire as `32 00 01 00`. A
+program therefore sends the same bytes whichever transport it ends up on.
+
 ## Architecture
 
 - `src/internal/sctp`: sans-IO engine. Datagrams, application sends and timer
@@ -118,5 +125,7 @@ GOROOT=$(pwd) ./bin/go test internal/sctp -run '^$' -fuzz FuzzInput -fuzztime 60
 ```
 
 The `net` tests force UDP with `SCTPUDPOnly`, so they run on hosts with and
-without kernel SCTP. Interop against usrsctp, rust-sctp, Linux kernel UDP
-encapsulation (`net.sctp.udp_port`) and FreeBSD is still to be run.
+without kernel SCTP. `misc/sctp-interop/udp` holds an interop matrix against
+usrsctp and rust-sctp, both directions, which passes on Linux (rust-sctp with
+64 KiB messages, its engine's limit). Linux kernel UDP encapsulation
+(`net.sctp.udp_port`, `d-kernel.sh`) and FreeBSD are still to be run.
