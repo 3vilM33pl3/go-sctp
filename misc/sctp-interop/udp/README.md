@@ -30,3 +30,19 @@ Known peer limitations (not Go bugs):
 - rust-sctp reports `Shutdown` but no SHUTDOWN_COMP association change.
 - sctp-proto drops an INIT whose last parameter is 4 bytes long; Go now puts
   Forward-TSN-Supported first for that reason.
+- rust-sctp's SHUTDOWN carries its own send-side cumulative ack point
+  (sctp-proto `association/mod.rs`, `ChunkShutdown { cumulative_tsn_ack:
+  self.cumulative_tsn_ack_point }`) instead of the cumulative TSN it received.
+  When that value is above the highest TSN Go sent, Go aborts with Protocol
+  Violation (RFC 9260 section 6.2), so `b-goserver-rustclient` fails about half
+  the time, depending on the random initial TSNs.
+
+## FreeBSD
+
+goecho reads the kernel ABI values per OS (MSG_EOR, MSG_NOTIFICATION, SCTP_EOF,
+notification numbering), so it cross-compiles:
+
+```bash
+GOROOT=$PWD GOOS=freebsd GOARCH=amd64 ./bin/go build -o goecho.freebsd ./misc/sctp-interop/udp/goecho/main.go
+GOROOT=$PWD GOOS=freebsd GOARCH=amd64 ./bin/go test -c -o net.test.freebsd net
+```

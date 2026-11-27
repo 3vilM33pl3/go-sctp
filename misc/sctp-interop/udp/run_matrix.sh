@@ -11,17 +11,26 @@ set -u
 cd "$(dirname "$0")"
 GOROOT=$(cd ../../.. && pwd)
 export GOROOT
-mkdir -p bin logs
-"$GOROOT/bin/go" build -o bin/goecho ./goecho/main.go
-"$GOROOT/bin/go" build -o bin/udprelay ./udprelay
+mkdir -p logs
+# Build every peer afresh: a failed build must stop the run, never fall back
+# to a stale binary from an earlier run.
+rm -rf bin/matrix
+mkdir -p bin/matrix
+die() { echo "FAIL build: $*" >&2; exit 1; }
+"$GOROOT/bin/go" build -o bin/matrix/goecho ./goecho/main.go || die goecho
+"$GOROOT/bin/go" build -o bin/matrix/udprelay ./udprelay/main.go || die udprelay
+have_rust=false have_usrsctp=false
 if [ -n "${RUSTC:-}" ]; then
-	"$RUSTC" -O --edition 2021 -o bin/rustecho rustecho/main.rs
-	BIG=1 "$RUSTC" -O --edition 2021 -o bin/rustecho64k rustecho/main.rs
+	"$RUSTC" -O --edition 2021 -o bin/matrix/rustecho rustecho/main.rs || die rustecho
+	BIG=1 "$RUSTC" -O --edition 2021 -o bin/matrix/rustecho64k rustecho/main.rs || die rustecho64k
+	have_rust=true
 fi
 if [ -n "${USRSCTP:-}" ]; then
 	cc -O2 -include pthread.h -include errno.h -I"$USRSCTP/usrsctplib" usrsctpecho/usrsctpecho.c \
-		"$USRSCTP/build/usrsctplib/libusrsctp.a" -lpthread -o bin/usrsctpecho
+		"$USRSCTP/build/usrsctplib/libusrsctp.a" -lpthread -o bin/matrix/usrsctpecho || die usrsctpecho
+	have_usrsctp=true
 fi
+B=bin/matrix
 
 rc=0
 pair() { # name server-cmd client-cmd
@@ -34,21 +43,21 @@ pair() { # name server-cmd client-cmd
 	if [ $cc = 0 ] && [ $sc = 0 ]; then echo "PASS $name"; else echo "FAIL $name (client=$cc server=$sc, logs/$name-*.log)"; rc=1; fi
 }
 p=21000
-pair a-go-go "bin/goecho -mode server -addr 127.0.0.1:$p" "bin/goecho -mode client -addr 127.0.0.1:$p"
+pair a-go-go "$B/goecho -mode server -addr 127.0.0.1:$p" "$B/goecho -mode client -addr 127.0.0.1:$p"
 p=$((p + 1))
-pair a-go-go-encap "bin/goecho -mode server -addr 127.0.0.1:$p -lencap 31001" \
-	"bin/goecho -mode client -addr 127.0.0.1:$p -local 127.0.0.1:21100 -lencap 31100 -rencap 31001"
-if [ -x bin/rustecho64k ] && [ -n "${RUSTC:-}" ]; then
+pair a-go-go-encap "$B/goecho -mode server -addr 127.0.0.1:$p -lencap 31001" \
+	"$B/goecho -mode client -addr 127.0.0.1:$p -local 127.0.0.1:21100 -lencap 31100 -rencap 31001"
+if $have_rust; then
 	p=$((p + 1))
-	pair b-goserver-rustclient "bin/goecho -mode server -addr 127.0.0.1:$p -big 65536" "bin/rustecho64k client 127.0.0.1:$p"
+	pair b-goserver-rustclient "$B/goecho -mode server -addr 127.0.0.1:$p -big 65536" "$B/rustecho64k client 127.0.0.1:$p"
 	p=$((p + 1))
-	pair b-rustserver-goclient "bin/rustecho64k server 127.0.0.1:$p" "bin/goecho -mode client -addr 127.0.0.1:$p -big 65536"
+	pair b-rustserver-goclient "$B/rustecho64k server 127.0.0.1:$p" "$B/goecho -mode client -addr 127.0.0.1:$p -big 65536"
 fi
-if [ -n "${USRSCTP:-}" ]; then
+if $have_usrsctp; then
 	p=$((p + 1))
-	pair c-usrsctpserver-goclient "bin/usrsctpecho server $p 3$p" "bin/goecho -mode client -addr 127.0.0.1:$p -rencap 3$p"
+	pair c-usrsctpserver-goclient "$B/usrsctpecho server $p 3$p" "$B/goecho -mode client -addr 127.0.0.1:$p -rencap 3$p"
 	p=$((p + 1))
-	pair c-goserver-usrsctpclient "bin/goecho -mode server -addr 127.0.0.1:$p" "bin/usrsctpecho client 127.0.0.1 $p 3$p $p"
+	pair c-goserver-usrsctpclient "$B/goecho -mode server -addr 127.0.0.1:$p" "$B/usrsctpecho client 127.0.0.1 $p 3$p $p"
 fi
-./d-kernel.sh >/dev/null 2>&1; case $? in 0) echo "PASS d-kernel";; 2) echo "SKIP d-kernel (sysctls unset)";; *) echo "FAIL d-kernel"; rc=1;; esac
+GOECHO=$B/goecho ./d-kernel.sh >/dev/null 2>&1; case $? in 0) echo "PASS d-kernel";; 2) echo "SKIP d-kernel (sysctls unset)";; *) echo "FAIL d-kernel"; rc=1;; esac
 exit $rc

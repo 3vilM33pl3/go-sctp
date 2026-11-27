@@ -11,6 +11,8 @@
 # (replies on an association follow the peer's observed UDP source port).
 set -u
 cd "$(dirname "$0")"
+G=${GOECHO:-bin/goecho}
+[ -x "$G" ] || { echo "FAIL: no goecho at $G" >&2; exit 1; }
 mkdir -p logs
 up=$(sysctl -n net.sctp.udp_port) ep=$(sysctl -n net.sctp.encap_port)
 if [ "$up" = 0 ] || [ "$ep" = 0 ]; then
@@ -27,14 +29,14 @@ pair() { # name server-cmd client-cmd
 	for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 $sp 2>/dev/null || break; sleep 0.5; done
 	kill $sp 2>/dev/null; wait $sp; local sc=$?
 	echo "=== $name client=$cc server=$sc"; cat logs/$name-client.log logs/$name-server.log
-	[ $cc = 0 ] || rc=1
+	[ $cc = 0 ] && [ $sc = 0 ] || rc=1
 }
 # Kernel SCTP server <- Go UDP-only client (sends to the kernel's UDP port).
 pair d1-kernelserver-goudpclient \
-	"bin/goecho -mode server -transport native -addr 127.0.0.1:19990" \
-	"bin/goecho -mode client -addr 127.0.0.1:19990 -rencap $up"
+	"$G -mode server -transport native -addr 127.0.0.1:19990" \
+	"$G -mode client -addr 127.0.0.1:19990 -rencap $up"
 # Go UDP-only server on UDP $ep <- kernel SCTP client (encapsulates to $ep).
 pair d2-goudpserver-kernelclient \
-	"bin/goecho -mode server -addr 127.0.0.1:19991 -lencap $ep" \
-	"bin/goecho -mode client -transport native -addr 127.0.0.1:19991"
+	"$G -mode server -addr 127.0.0.1:19991 -lencap $ep" \
+	"$G -mode client -transport native -addr 127.0.0.1:19991"
 exit $rc

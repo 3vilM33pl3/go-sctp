@@ -19,16 +19,29 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime"
+	"syscall"
 	"time"
 )
 
-const (
-	msgNotification = 0x8000
-	msgEOR          = 0x80
-	flagEOF         = 0x0200 // MSG_FIN on Linux
-	notifAssoc      = 0x8001
-	notifShutdown   = 0x8005
+// Kernel ABI values, which go-sctp's UDP transport reproduces per OS.
+var (
+	freebsd         = runtime.GOOS == "freebsd"
+	msgNotification = pick(0x2000, 0x8000)
+	msgEOR          = syscall.MSG_EOR
+	flagEOF         = uint16(pick(0x0100, 0x0200)) // SCTP_EOF / MSG_FIN
+	notifAssoc      = uint16(pick(0x0001, 0x8001))
+	notifShutdown   = uint16(pick(0x0005, 0x8005))
+	stateCommLost   = uint16(pick(2, 1))
+	stateShutComp   = uint16(pick(4, 3))
 )
+
+func pick(onFreeBSD, onLinux int) int {
+	if freebsd {
+		return onFreeBSD
+	}
+	return onLinux
+}
 
 var (
 	mode      = flag.String("mode", "server", "server or client")
@@ -79,11 +92,11 @@ func notif(b []byte) string {
 }
 
 func isShutdownComp(b []byte) bool {
-	return len(b) >= 10 && binary.NativeEndian.Uint16(b) == notifAssoc && binary.NativeEndian.Uint16(b[8:]) == 3
+	return len(b) >= 10 && binary.NativeEndian.Uint16(b) == notifAssoc && binary.NativeEndian.Uint16(b[8:]) == stateShutComp
 }
 
 func isCommLost(b []byte) bool {
-	return len(b) >= 10 && binary.NativeEndian.Uint16(b) == notifAssoc && binary.NativeEndian.Uint16(b[8:]) == 1
+	return len(b) >= 10 && binary.NativeEndian.Uint16(b) == notifAssoc && binary.NativeEndian.Uint16(b[8:]) == stateCommLost
 }
 
 type msg struct {
