@@ -113,6 +113,15 @@ type Message struct {
 	CumTSN    uint32
 	Unordered bool
 	Data      []byte
+
+	// Partial reports that Data is a piece of a larger message and more
+	// pieces follow. The engine delivers a message in pieces when it
+	// would not otherwise fit in the receive window.
+	Partial bool
+
+	// Aborted marks an empty message that ends a partial delivery whose
+	// remaining data the sender abandoned (PR-SCTP).
+	Aborted bool
 }
 
 // EventKind identifies an association event.

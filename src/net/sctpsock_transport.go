@@ -7,6 +7,7 @@ package net
 import (
 	"errors"
 	"internal/godebug"
+	"io"
 	"os"
 	"time"
 )
@@ -147,8 +148,8 @@ var errSCTPUDPUnsupported error = sctpUDPUnsupportedError{}
 func (c *SCTPConn) ok() bool { return c != nil && (c.fd != nil || c.udp != nil) }
 
 func (c *SCTPConn) udpOpErr(op string, err error) error {
-	if err == nil {
-		return nil
+	if err == nil || err == io.EOF {
+		return err
 	}
 	if _, ok := err.(*OpError); ok {
 		return err

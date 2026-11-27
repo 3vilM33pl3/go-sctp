@@ -525,13 +525,24 @@ func (u *sctpUDPConn) readFrom(b []byte) (n, oobn, flags int, addr *SCTPAddr, in
 			flags = 0
 			if len(u.partial) == 0 {
 				u.partial = nil
-				flags = sctpUDPMsgEOR
+				if !m.Partial {
+					flags = sctpUDPMsgEOR
+				}
 			}
 			return n, 0, flags, u.sctpAddr(m), u.rcvInfo(m), nil
 		}
 		if m, ok := u.ep.PollMessage(time.Now()); ok {
+			if m.Aborted {
+				// A partially delivered message was abandoned by
+				// the sender; the next read starts a new message.
+				u.afterLocked()
+				continue
+			}
 			n = copy(b, m.Data)
-			flags = sctpUDPMsgEOR
+			flags = 0
+			if !m.Partial {
+				flags = sctpUDPMsgEOR
+			}
 			if n < len(m.Data) {
 				u.partial = m.Data[n:]
 				u.partialMsg = m
@@ -638,6 +649,9 @@ func (u *sctpUDPConn) writeTo(b []byte, addr *SCTPAddr, info *SCTPSndInfo) (int,
 		send.PRPolicy, send.PRValue = sctp.PRRTX, u.defPR.Value
 	}
 	for {
+		if !u.wdl.IsZero() && !now.Before(u.wdl) {
+			return 0, os.ErrDeadlineExceeded
+		}
 		err := a.Send(now, b, send)
 		switch err {
 		case nil:

@@ -119,6 +119,20 @@ func (a *Association) handleForwardTSN(now time.Time, f forwardTSNChunk) {
 		delete(a.recvd, a.peerCum+1)
 		a.peerCum++
 	}
+	if pd := a.pd; pd != nil {
+		if pd.unordered {
+			if tsnLTE(pd.next, f.newCumTSN) {
+				a.abortPD()
+			}
+		} else {
+			for _, p := range f.streams {
+				if p.stream == pd.stream && !ssnLT(p.ssn, pd.ssn) {
+					a.abortPD()
+					break
+				}
+			}
+		}
+	}
 	for _, s := range a.instreams {
 		keep := s.unordered[:0]
 		for _, fr := range s.unordered {

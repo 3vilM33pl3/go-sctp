@@ -63,6 +63,14 @@ follow the UDP source port the peer actually uses (RFC 6951 section 5.5).
 - `src/net/sctpsock_transport.go`: public policy types and the dispatch of
   inherited `Conn` methods to the UDP transport.
 
+A message larger than the receive window is delivered in pieces
+(partial delivery): reads return its data without `MSG_EOR` until the
+last piece, and no other message is delivered on that association in
+between. If the sender abandons the rest of such a message (PR-SCTP), the
+next read starts a new message; no partial-delivery-aborted notification is
+generated. Messages queued on a one-to-many socket during implicit setup on
+a stream the peer did not grant are dropped once the handshake completes.
+
 Socket model matches the kernel path: a listener is one-to-many and creates
 associations implicitly on the first send to a new peer; a dialed connection is
 one-to-one. `Close` shuts associations down gracefully in the background and

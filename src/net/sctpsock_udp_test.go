@@ -315,8 +315,8 @@ func TestSCTPUDPCloseSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if _, err := c.Read(b); !errors.Is(err, io.EOF) {
-		t.Fatalf("Read after peer shutdown = %v, want EOF", err)
+	if _, err := c.Read(b); err != io.EOF {
+		t.Fatalf("Read after peer shutdown = %v, want io.EOF itself", err)
 	}
 	c.Close()
 	if _, err := c.Read(b); !errors.Is(err, ErrClosed) {
@@ -487,3 +487,58 @@ func TestSCTPUDPEncapPorts(t *testing.T) {
 }
 
 func goarchBigEndian() bool { return goarch.BigEndian }
+
+func TestSCTPUDPWriteDeadline(t *testing.T) {
+	ln := listenUDPSCTP(t)
+	c := dialUDPSCTP(t, ln)
+	if _, err := c.Write([]byte("before")); err != nil {
+		t.Fatal(err)
+	}
+	c.SetWriteDeadline(time.Now().Add(-time.Second))
+	if _, err := c.Write([]byte("after")); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Write after deadline = %v, want ErrDeadlineExceeded", err)
+	}
+	c.SetWriteDeadline(time.Time{})
+	if _, err := c.Write([]byte("again")); err != nil {
+		t.Fatalf("Write after clearing deadline = %v", err)
+	}
+}
+
+func TestSCTPUDPMessageLargerThanWindow(t *testing.T) {
+	ln := listenUDPSCTP(t)
+	if err := ln.SetReadBuffer(8000); err != nil {
+		t.Fatal(err)
+	}
+	c := dialUDPSCTP(t, ln)
+	big := make([]byte, 64<<10)
+	for i := range big {
+		big[i] = byte(i * 31)
+	}
+	errc := make(chan error, 1)
+	go func() {
+		_, err := c.Write(big)
+		errc <- err
+	}()
+	var got []byte
+	b := make([]byte, 4096)
+	ln.SetReadDeadline(time.Now().Add(20 * time.Second))
+	for {
+		n, _, flags, _, _, err := ln.ReadFromSCTP(b)
+		if err != nil {
+			t.Fatalf("after %d bytes: %v", len(got), err)
+		}
+		if flags&sctpUDPMsgNotification != 0 {
+			continue
+		}
+		got = append(got, b[:n]...)
+		if flags&sctpUDPMsgEOR != 0 {
+			break
+		}
+	}
+	if !bytes.Equal(got, big) {
+		t.Fatalf("got %d bytes, want %d intact", len(got), len(big))
+	}
+	if err := <-errc; err != nil {
+		t.Fatal(err)
+	}
+}

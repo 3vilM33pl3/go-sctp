@@ -315,6 +315,11 @@ func checkTransfer(t *testing.T, seed uint64, loss, dup float64, jitter time.Dur
 	s := newSim(t, seed)
 	client, server, ca, _ := connectPair(t, s)
 	s.loss, s.dup, s.jitter = loss, dup, jitter
+	// At heavy loss the default limit of 10 consecutive retransmissions
+	// is reached by chance (about 0.5^11 per chunk with 30% loss each
+	// way), which correctly ends the association. Allow more here so
+	// the test checks data integrity, not that probability.
+	client.cfg.MaxRetrans, server.cfg.MaxRetrans = 40, 40
 	f := flow{sent: map[uint16][][]byte{}, got: map[uint16][][]byte{}}
 	var unordered [][]byte
 	unorderedGot := map[string]bool{}
@@ -341,6 +346,11 @@ func checkTransfer(t *testing.T, seed uint64, loss, dup float64, jitter time.Dur
 			queued++
 		}
 		if !s.step() {
+			sa := server.assocs
+			for _, a := range sa {
+				t.Logf("server assoc state=%v peerCum=%d held=%d unread=%d pd=%v recvd=%d", a.state, a.peerCum, a.rcvHeld, a.unread, a.pd, len(a.recvd))
+			}
+			t.Logf("client state=%v pending=%d inflight=%d cwnd=%d rwnd=%d t3=%v closed=%v cevents=%+v sevents=%+v", ca.state, len(ca.pending), len(ca.inflight), ca.cwnd, ca.peerRwnd, ca.t3, ca.Closed(), drainEvents(client), drainEvents(server))
 			t.Fatal("simulation stalled")
 		}
 		for {
@@ -696,4 +706,92 @@ func parsePacketNoCRC(b []byte) (header, []chunk, error) {
 	sum := checksum(c)
 	c[8], c[9], c[10], c[11] = byte(sum), byte(sum>>8), byte(sum>>16), byte(sum>>24)
 	return parsePacket(c)
+}
+
+// readPieces reads one message, joining partially delivered pieces.
+func readPieces(t *testing.T, s *sim, e *Endpoint, pieces *int) Message {
+	t.Helper()
+	var whole Message
+	started := false
+	s.runUntil(time.Hour, func() bool {
+		for {
+			m, ok := e.PollMessage(s.now)
+			if !ok {
+				return false
+			}
+			if m.Aborted {
+				t.Fatal("unexpected aborted partial delivery")
+			}
+			if !started {
+				whole, started = m, true
+				whole.Data = bytes.Clone(m.Data)
+			} else {
+				if m.Stream != whole.Stream || m.Unordered != whole.Unordered {
+					t.Fatalf("piece from stream %d interleaved into message on stream %d", m.Stream, whole.Stream)
+				}
+				whole.Data = append(whole.Data, m.Data...)
+			}
+			*pieces++
+			if !m.Partial {
+				whole.Partial = false
+				return true
+			}
+		}
+	})
+	return whole
+}
+
+func TestPartialDelivery(t *testing.T) {
+	for _, unordered := range []bool{false, true} {
+		s := newSim(t, 17)
+		s.loss = 0.05
+		client, _ := s.endpoint("192.0.2.1:40000", false, nil)
+		server, srv := s.endpoint("192.0.2.2:5000", true, func(c *Config) { c.RecvBuffer = 8000 })
+		ca, _ := client.Connect(s.now, srv, 5000)
+		s.runUntil(time.Minute, func() bool { return ca.Established() })
+		big := make([]byte, 50_000)
+		for i := range big {
+			big[i] = byte(i * 13)
+		}
+		if err := ca.Send(s.now, big, SendInfo{Stream: 2, Unordered: unordered}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ca.Send(s.now, []byte("after"), SendInfo{Stream: 3}); err != nil {
+			t.Fatal(err)
+		}
+		pieces := 0
+		m := readPieces(t, s, server, &pieces)
+		if !bytes.Equal(m.Data, big) || m.Stream != 2 {
+			t.Fatalf("unordered=%v: message larger than the window corrupted (%d bytes, stream %d)", unordered, len(m.Data), m.Stream)
+		}
+		if pieces < 2 {
+			t.Fatalf("unordered=%v: delivered in %d piece(s), want partial delivery", unordered, pieces)
+		}
+		pieces = 0
+		if m := readPieces(t, s, server, &pieces); string(m.Data) != "after" || pieces != 1 {
+			t.Fatalf("unordered=%v: next message = %q in %d pieces", unordered, m.Data, pieces)
+		}
+	}
+}
+
+func TestQueuedStreamBeyondNegotiated(t *testing.T) {
+	s := newSim(t, 18)
+	client, _ := s.endpoint("192.0.2.1:40000", false, nil)
+	_, srv := s.endpoint("192.0.2.2:5000", true, func(c *Config) { c.MaxInStreams = 1 })
+	ca, err := client.Connect(s.now, srv, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Queued during setup on a stream the peer will not grant.
+	if err := ca.Send(s.now, []byte("dropped"), SendInfo{Stream: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ca.Send(s.now, []byte("kept"), SendInfo{Stream: 0}); err != nil {
+		t.Fatal(err)
+	}
+	s.runUntil(time.Minute, func() bool { return ca.Established() })
+	if ca.numOut != 1 {
+		t.Fatalf("numOut = %d, want 1", ca.numOut)
+	}
+	s.runUntil(time.Minute, func() bool { return ca.Buffered() == 0 })
 }

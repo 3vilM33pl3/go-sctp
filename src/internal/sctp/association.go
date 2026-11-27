@@ -78,6 +78,14 @@ type inFrag struct {
 	payload []byte
 }
 
+// pdState tracks a message being delivered in pieces (partial delivery).
+type pdState struct {
+	stream    uint16
+	unordered bool
+	ssn       uint16
+	next      uint32 // TSN of the next piece
+}
+
 type inStream struct {
 	nextSSN   uint16
 	ordered   []inFrag // sorted by TSN
@@ -139,6 +147,8 @@ type Association struct {
 	instreams     map[uint16]*inStream
 	rcvBuf        int
 	rcvHeld       int // bytes in reassembly or delivered but unread
+	unread        int // bytes delivered but unread
+	pd            *pdState
 	lastAdvRwnd   uint32
 	needSack      bool
 	sackNow       bool
@@ -374,6 +384,10 @@ func (a *Association) consumed(now time.Time, n int) {
 	if a.rcvHeld < 0 {
 		a.rcvHeld = 0
 	}
+	a.unread -= n
+	if a.unread < 0 {
+		a.unread = 0
+	}
 	// Window update: tell the peer once the window has opened by at
 	// least an MTU from a small advertised value.
 	if a.Established() && int(a.rwnd())-int(a.lastAdvRwnd) >= a.mtu && int(a.lastAdvRwnd) < a.rcvBuf/2 {
@@ -585,8 +599,10 @@ func (a *Association) handleData(now time.Time, c chunk) {
 		return
 	}
 	// Drop new data beyond the window. An empty buffer always takes a
-	// chunk, so a zero-window probe makes progress.
-	if a.rcvHeld > 0 && a.rcvHeld+len(d.payload) > a.rcvBuf {
+	// chunk, so a zero-window probe makes progress. So does the next
+	// TSN in sequence while the application has nothing left to read:
+	// it lets partial delivery drain a window that reassembly filled.
+	if a.rcvHeld > 0 && a.rcvHeld+len(d.payload) > a.rcvBuf && !(d.tsn == a.peerCum+1 && a.unread == 0) {
 		a.sackNow = true
 		return
 	}
@@ -671,6 +687,10 @@ func complete(fs []inFrag, i int) (int, bool) {
 }
 
 func (a *Association) emitMessage(stream uint16, fs []inFrag, unordered bool) {
+	a.emitPiece(stream, fs, unordered, false)
+}
+
+func (a *Association) emitPiece(stream uint16, fs []inFrag, unordered, partial bool) {
 	n := 0
 	for _, f := range fs {
 		n += len(f.payload)
@@ -683,11 +703,94 @@ func (a *Association) emitMessage(stream uint16, fs []inFrag, unordered bool) {
 		Assoc: a.id, Peer: a.peer, PeerPort: a.peerPort,
 		Stream: stream, SSN: fs[0].ssn, PPID: fs[0].ppid,
 		TSN: fs[len(fs)-1].tsn, CumTSN: a.peerCum, Unordered: unordered, Data: data,
+		Partial: partial,
 	})
+	a.unread += n
+}
+
+// continuePD delivers the pieces of the message under partial delivery
+// that have arrived in sequence. It reports whether partial delivery is
+// still in progress.
+func (a *Association) continuePD() bool {
+	pd := a.pd
+	s := a.instreams[pd.stream]
+	list := &s.ordered
+	if pd.unordered {
+		list = &s.unordered
+	}
+	var got []inFrag
+	done := false
+	for !done {
+		i := -1
+		for j, f := range *list {
+			if f.tsn == pd.next && (pd.unordered || f.ssn == pd.ssn) {
+				i = j
+				break
+			}
+		}
+		if i < 0 {
+			break
+		}
+		f := (*list)[i]
+		*list = append((*list)[:i], (*list)[i+1:]...)
+		got = append(got, f)
+		pd.next++
+		done = f.flags&dataFlagEnd != 0
+	}
+	if len(got) > 0 {
+		a.emitPiece(pd.stream, got, pd.unordered, !done)
+	}
+	if done {
+		a.pd = nil
+		if !pd.unordered {
+			s.nextSSN++
+		}
+	}
+	return a.pd != nil
+}
+
+// startPD begins partial delivery of the first incomplete message when
+// reassembly alone has nearly filled the receive window, so a message
+// larger than the window can still make progress.
+func (a *Association) startPD() {
+	if a.pd != nil || a.rcvHeld-a.unread+a.mtu < a.rcvBuf {
+		return
+	}
+	for id, s := range a.instreams {
+		for _, f := range s.ordered {
+			if f.ssn == s.nextSSN && f.flags&dataFlagBegin != 0 {
+				a.pd = &pdState{stream: id, ssn: f.ssn, next: f.tsn}
+				a.continuePD()
+				return
+			}
+		}
+		for _, f := range s.unordered {
+			if f.flags&dataFlagBegin != 0 {
+				a.pd = &pdState{stream: id, unordered: true, next: f.tsn}
+				a.continuePD()
+				return
+			}
+		}
+	}
+}
+
+// abortPD ends a partial delivery whose remaining data was abandoned.
+func (a *Association) abortPD() {
+	a.ep.msgs = append(a.ep.msgs, Message{
+		Assoc: a.id, Peer: a.peer, PeerPort: a.peerPort,
+		Stream: a.pd.stream, SSN: a.pd.ssn, Unordered: a.pd.unordered, Aborted: true,
+	})
+	a.pd = nil
 }
 
 // deliver moves complete messages to the endpoint's queue.
 func (a *Association) deliver() {
+	// While a message is delivered in pieces nothing else is, so the
+	// application never sees two messages interleaved.
+	if a.pd != nil && a.continuePD() {
+		a.reconfOnCumAdvance()
+		return
+	}
 	for id, s := range a.instreams {
 		for i := 0; i < len(s.unordered); {
 			if end, ok := complete(s.unordered, i); ok {
@@ -726,6 +829,7 @@ func (a *Association) deliver() {
 			s.nextSSN++
 		}
 	}
+	a.startPD()
 	a.reconfOnCumAdvance()
 }
 
@@ -1179,6 +1283,13 @@ func (a *Association) transmit(now time.Time) {
 			}
 			if c.held {
 				kept = append(kept, c)
+				continue
+			}
+			if c.msg.stream >= a.numOut {
+				// Queued before the handshake, on a stream the peer
+				// did not grant. Drop the message.
+				c.msg.abandoned = true
+				a.buffered -= len(c.payload)
 				continue
 			}
 			if (flight+len(c.payload) > a.cwnd || int(a.peerRwnd) < len(c.payload) || burst >= 4*a.mtu) && flight > 0 {
