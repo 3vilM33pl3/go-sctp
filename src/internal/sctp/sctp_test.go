@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"internal/byteorder"
 	"math/rand/v2"
 	"net/netip"
 	"testing"
@@ -862,5 +863,22 @@ func TestNoHeartbeatSpinInShutdownAckSent(t *testing.T) {
 	server.HandleTimers(later)
 	if d := server.NextDeadline(); !d.IsZero() && !d.After(later) {
 		t.Fatalf("NextDeadline = %v, still due at %v", d, later)
+	}
+}
+
+// sctp-proto (used by rust-sctp and webrtc-rs) drops an INIT whose last
+// parameter is header-only (4 bytes), so INIT and INIT ACK must not end
+// with Forward-TSN-Supported.
+func TestInitLastParamNotHeaderOnly(t *testing.T) {
+	e := NewEndpoint(Config{Rand: func() uint64 { return 42 }, LocalPort: 5000, Accept: true})
+	_, extra := e.localInit(1, 1, 10, 10, 65536)
+	var last uint16
+	for p := extra; len(p) >= 4; {
+		l := int(byteorder.BEUint16(p[2:]))
+		last = uint16(l)
+		p = p[min(len(p), l+padLen(l-4)):]
+	}
+	if last <= 4 {
+		t.Fatalf("INIT parameters end with a %d-byte parameter: % x", last, extra)
 	}
 }

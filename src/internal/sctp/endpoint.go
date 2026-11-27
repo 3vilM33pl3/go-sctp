@@ -519,8 +519,11 @@ func (e *Endpoint) outOfTheBlue(from netip.AddrPort, h header, chunks []chunk) {
 func (e *Endpoint) localInit(tag, tsn uint32, numOut, maxIn uint16, rwnd int) (initChunk, []byte) {
 	in := initChunk{initTag: tag, arwnd: uint32(rwnd), numOut: numOut, maxIn: maxIn, initialTSN: tsn}
 	var extra []byte
-	extra = appendParam(extra, ptSupportedExt, []byte{ctForwardTSN, ctReconfig})
+	// Forward-TSN-Supported goes first: sctp-proto (rust-sctp's and
+	// webrtc-rs's engine) skips a trailing 4-byte parameter when parsing
+	// INIT, miscomputes the chunk length and drops the whole packet.
 	extra = appendParam(extra, ptForwardTSNSupport, nil)
+	extra = appendParam(extra, ptSupportedExt, []byte{ctForwardTSN, ctReconfig})
 	return in, extra
 }
 
